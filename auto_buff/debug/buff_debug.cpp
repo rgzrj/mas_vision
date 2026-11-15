@@ -66,9 +66,7 @@ void BuffDebug::show(const cv::Mat &image, std::vector<rm_utils::DisplayText> &t
                      const std::vector<rm_utils::DisplayPoint> &points,
                      const std::vector<rm_utils::DisplayLine> &lines) const
 {
-    for (auto &text : texts)
-        text.image_overlay = true;
-
+    // 各模块只把状态文字标为 image_overlay，点旁标签不能扩大左上角背景范围。
     rm_utils::Display::getInstance().display_add(window_name_, image, texts, points, lines);
 }
 

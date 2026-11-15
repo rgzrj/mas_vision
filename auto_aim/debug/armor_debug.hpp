@@ -77,7 +77,7 @@ protected:
 
     /**
      * @brief 将子类生成的文字、点和线提交到本实例的 Display 窗口
-     * @note 图像只在调用期间借用，不保存整帧快照
+     * @note 调试类不复制图像；Display在采样后持有只读图像引用直到显示完成
      */
     void show(const cv::Mat &image, std::vector<rm_utils::DisplayText> &texts,
               const std::vector<rm_utils::DisplayPoint> &points, const std::vector<rm_utils::DisplayLine> &lines) const;
@@ -86,7 +86,7 @@ private:
     bool enabled_ = false;    ///< YAML 控制的模块图像调试开关
     std::string window_name_; ///< 本模块对应的 Display 窗口
 
-    // 每个调试实例独立统计绘制频率，首个完整周期前 FPS 为 -1。
+    // 每个调试实例独立统计算法调用频率，首个完整周期前 FPS 为 -1。
     std::chrono::steady_clock::time_point fps_start_{};
     unsigned fps_frames_ = 0;
     double fps_          = -1;

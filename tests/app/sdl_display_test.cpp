@@ -54,6 +54,9 @@ int main(int argc, char **argv)
         auto &display = rm_utils::Display::getInstance();
         const auto file = output / "sdl_numeric.rrd";
         display.start(false, tool::utf8(file), {}, "sdl");
+        require(display.image_due(0, std::nullopt) && !display.image_due(.001, 0.) &&
+                    !display.image_due(.02, 0.) && display.image_due(.04, 0.) && display.image_due(0, 1.),
+                "SDL image submission is not sampled at 30Hz or cannot rewind");
         display.layout({{"detect", 128}, {"track", 320}, {"shoot", 288}});
         cv::Mat detect(240, 320, CV_8UC3, cv::Scalar(10, 20, 30));
         cv::Mat track(240, 320, CV_8UC3, cv::Scalar(40, 50, 60));
@@ -65,6 +68,8 @@ int main(int argc, char **argv)
         display.display_add("detect", detect,
                             {{"Process FPS: 80", 10, 10, 16, {255, 255, 0, 255}, 1, true}},
                             {}, {{20, 150, 200, 150, 1, {0, 255, 0, 255}}}, 320);
+        require(detect.u->refcount > 1 && track.u->refcount > 1 && shoot.u->refcount > 1,
+                "SDL still builds pixel panels on the algorithm thread instead of retaining image references");
         display.end_frame();
         display.poll();
         auto *dw = window("detect"), *tw = window("track"), *sw = window("shoot");
@@ -84,10 +89,18 @@ int main(int argc, char **argv)
                 "SDL modified the original image");
         cv::imwrite(tool::utf8(output / "detect_window.png"), first);
 
-        // 同一 1/60 秒区间内发布多帧；每个窗口只显示最新帧，并清除旧图元。
+        // 采样间隔内不提交新图；图像跳过不影响数值记录。
+        display.set_time(.001);
+        display.display_add("detect", cv::Mat::zeros(detect.size(), detect.type()), {}, {}, {}, 320);
+        display.scalar("test/value", 0);
+        display.end_frame();
+        display.poll();
+        require(capture(dw).at<cv::Vec3b>(200, 20) == cv::Vec3b(10, 20, 30),
+                "A sampled-out image replaced the displayed frame");
+        // 连续发布两组可显示帧但不poll；只保留最新帧，临时图像离开作用域后仍有效。
         for (int i = 1; i <= 2; ++i)
         {
-            display.set_time(i / 1000.);
+            display.set_time(i / 25.);
             cv::Mat newer(240, 320, CV_8UC3, cv::Scalar(100 + i, 110, 120));
             for (const auto *name : {"detect", "track", "shoot"})
                 display.display_add(name, newer, {}, {}, {}, 320);
@@ -130,6 +143,12 @@ int main(int argc, char **argv)
         };
         key(SDLK_SPACE);
         require(controls.paused && !controls.take_step(), "Window keyboard did not pause playback");
+        display.set_time(1.001); // 与上一帧1.0秒处于同一个采样区间。
+        display.display_add("detect", cv::Mat(detect.size(), detect.type(), cv::Scalar(80, 90, 100)), {}, {}, {}, 320);
+        display.end_frame();
+        display.poll(&controls);
+        require(capture(dw).at<cv::Vec3b>(200, 20) == cv::Vec3b(80, 90, 100),
+                "Paused replay step was hidden by the SDL image sampling limit");
         key(SDLK_n);
         require(controls.take_step() && !controls.take_step(), "Window single step repeated");
         key(SDLK_SPACE);
@@ -173,10 +192,15 @@ int main(int argc, char **argv)
         // 独立相机预览未设置固定布局，仍按自己的名称创建一个窗口。
         display.start(false, {}, {}, "sdl");
         display.set_time(0);
-        display.display_add("camera", detect, {}, {}, {}, 320);
+        cv::Mat full_size(480, 640, CV_8UC3, cv::Scalar(10, 20, 30));
+        display.display_add("camera", full_size, {}, {{320, 240, {0, 255, 0, 255}, 6}}, {}, 320);
+        full_size.release(); // 提交任务拥有引用，不依赖调用方cv::Mat对象的生命周期。
         display.end_frame();
         display.poll();
         require(window("camera") && visible_windows() == 1, "Independent camera preview broke");
+        require(capture(window("camera")).at<cv::Vec3b>(120, 160)[1] > 200 &&
+                    capture(window("camera")).at<cv::Vec3b>(200, 20) == cv::Vec3b(10, 20, 30),
+                "SDL texture scaling lost original pixel coordinates or frame ownership");
         display.shutdown();
         std::cout << "SDL independent windows, flags, frame ownership, close routing and controls passed.\n";
         return 0;

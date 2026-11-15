@@ -105,7 +105,7 @@ check_pairs.py通过replay的--validate选项复用生产配对校验，不打�
 
 ## 6. 调试和输出
 
-各模块debug控制显示提交，auto_buff.yaml中的display.backend选择sdl或rerun。实机按当前armor/buff切换对应布局，各模块独立SDL窗口；Rerun沿用共享底图布局，避免重复编码。关闭某个窗口不等于停用算法。
+各模块debug控制显示提交，auto_buff.yaml中的display.backend选择sdl或rerun。实机按当前armor/buff切换对应布局，各模块独立SDL窗口；Rerun沿用共享底图布局，避免重复编码。关闭某个窗口不等于停用算法。SDL图像在提交前按30 Hz采样，算法线程只交图像引用和图元，实际绘制由主线程完成；窗口中的Process FPS仍表示算法处理速度。
 
 Rerun Viewer为单独程序。需要时在共享环境安装与C++ SDK一致的版本：
 

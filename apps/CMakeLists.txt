@@ -4,6 +4,6 @@ add_executable(mas_vision main.cpp
     calibration/calibrate_handeye.cpp
     calibration/calibrate_latency.cpp)
 target_compile_definitions(mas_vision PRIVATE BUFF_MVS_HAS_LIFECYCLE=$<BOOL:${MVS_HAS_LIFECYCLE}>)
-target_link_libraries(mas_vision PRIVATE vision_threads)
+target_link_libraries(mas_vision PRIVATE vision_threads buff_io)
 add_subdirectory(record)
 add_subdirectory(replay)

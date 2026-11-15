@@ -295,6 +295,13 @@ int main()
                 const auto detection = detector.detect(image, 2, auto_buff::RuneMode::big);
                 require(detection.boards.empty() && panels.size() == 1 && text_contains(panels.front(), "boards=0"),
                         "Detector drew before mode filtering");
+                require(std::count_if(panels.front().texts.begin(), panels.front().texts.end(),
+                                      [](const auto &text) { return text.image_overlay; }) == 3 &&
+                            std::any_of(panels.front().texts.begin(), panels.front().texts.end(),
+                                        [](const auto &text) {
+                                            return text.content.starts_with("R: ") && !text.image_overlay;
+                                        }),
+                        "Target labels expanded the detect HUD background over the image");
                 auto_buff::RmcsTracker rune(root / "config/hikcamera.yaml", YAML::Load("debug: true"));
                 const auto track       = rune.update(detection, 2, image);
                 const auto buff_config = temporary.path / "buff_shoot.yaml";

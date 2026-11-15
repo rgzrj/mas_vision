@@ -65,16 +65,16 @@ struct DisplayView
 class Display
 {
   public:
-    // Rerun 图像编码采样上限；SDL 不受此限制，始终取最新可用画面。
+    // 只限制图像提交；算法与数值曲线继续逐帧运行。
     static constexpr double kImageFps = 60;
+    static constexpr double kSdlImageFps = 30;
     static Display &getInstance();
     Display(const Display &) = delete;
     Display &operator=(const Display &) = delete;
     ~Display();
 
     // rerun 默认启动 Viewer；sdl 只显示本机画面。file 非空时同时写 RRD（SDL 下仅数值）。
-    // start/shutdown/poll由主线程调用；图元和end_frame由同一诊断/预览生产者调用。
-    // 独立采集预览的生产者也是主线程；BuffDebug会话的生产者是其绘制线程。
+    // start/shutdown/poll由主线程调用；图元和end_frame由同一算法/预览生产者调用。
     void start(bool spawn = true, const std::string &file = {}, const std::string &address = {},
                const std::string &backend = "rerun", const std::string &image_encoding = "jpeg",
                const std::string &hud_encoding = "png");
@@ -92,7 +92,7 @@ class Display
     // 提交端在复制图像前询问；采样策略由所选后端统一决定，不推进显示线程时间线。
     bool image_due(double seconds, std::optional<double> last_image_time) const;
 
-    // SDL：后台在一帧的所有模块绘制后发布，主线程定期处理事件并显示最新画面。
+    // SDL：一帧所有模块提交后发布任务，主线程取最新一组再做实际绘制。
     // Rerun 后端下两者为空操作。
     void end_frame();
     // 仅离线回放传入控制对象；实机仍只处理窗口事件，不响应暂停/单步。
@@ -110,7 +110,8 @@ class Display
     // 必须使用当前帧曝光/媒体时间；SDK 时间线属于调用线程，不改动算法时间戳。
     void set_time(double seconds);
     // SDL按width等比缩放，高度由原图比例决定；height仅保留MAS调用兼容，当前不参与计算。
-    // Rerun记录原图，忽略显示尺寸。image仅在本次调用内借用，异步快照由BuffDebug持有。
+    // Rerun记录原图，忽略显示尺寸。SDL只读共享image存储，直到主线程显示完成。
+    // 调用方不能原地覆盖待显示存储；海康相机池已用cv::Mat引用计数保护复用。
     void display_add(const std::string &name, const cv::Mat &image,
                      const std::vector<DisplayText> &texts = {},
                      const std::vector<DisplayPoint> &points = {},

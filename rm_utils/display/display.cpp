@@ -1,6 +1,7 @@
 #include "display.hpp"
 #include "rerun/rerun_display.hpp"
 #include "sdl/sdl_display.hpp"
+#include "rm_utils/io/playback_control.hpp"
 
 #include <cmath>
 #include <format>
@@ -25,7 +26,7 @@ struct Display::Impl
     std::unique_ptr<RerunDisplay> rerun;
     double frame_time = NAN;
     std::optional<double> last_image_time;
-    bool draw = false;
+    bool draw = false, playback_paused = false;
     YAML::Node deferred_settings;
     std::filesystem::path config_path, output;
     bool deferred_start = false, layout_changed = false;
@@ -34,9 +35,10 @@ struct Display::Impl
 
     bool image_due(double seconds, std::optional<double> last) const
     {
+        const double fps = sdl ? Display::kSdlImageFps : Display::kImageFps;
         return (sdl || rerun) && std::isfinite(seconds) &&
-               (sdl || !last || seconds < *last ||
-                std::floor(seconds * Display::kImageFps) != std::floor(*last * Display::kImageFps));
+               ((sdl && playback_paused) || !last || seconds < *last ||
+                std::floor(seconds * fps) != std::floor(*last * fps));
     }
 };
 
@@ -78,6 +80,7 @@ void Display::start(bool spawn, const std::string &file, const std::string &addr
     impl_->frame_time = NAN;
     impl_->last_image_time.reset();
     impl_->draw = false;
+    impl_->playback_paused = false;
 }
 
 void Display::start(const std::filesystem::path &config_path, const std::filesystem::path &output)
@@ -182,6 +185,9 @@ void Display::poll(tool::PlaybackControl *playback, const std::function<void(int
     // 生命周期由主线程独占；SDL 的最新帧槽自行同步，不持 SDK 锁渲染。
     if (impl_->sdl)
         impl_->sdl->poll(playback, on_key);
+    // 暂停后的单步必须显示刚处理的帧，不能因媒体时间间隔不足1/30秒被采样跳过。
+    std::lock_guard lock(impl_->mutex);
+    impl_->playback_paused = playback && playback->paused;
 }
 
 void Display::register_layout(const std::string &name, const std::vector<DisplayView> &views,
@@ -222,7 +228,7 @@ void Display::set_time(double seconds)
     if (seconds != impl_->frame_time)
     {
         impl_->frame_time = seconds;
-        // SDL 按最新帧显示，不套用 Rerun 的编码采样上限。
+        // 图像提交前采样；数值仍逐帧记录，算法时间与FPS统计不受图像刷新率影响。
         impl_->draw = impl_->image_due(seconds, impl_->last_image_time);
         if (impl_->draw)
             impl_->last_image_time = seconds;
