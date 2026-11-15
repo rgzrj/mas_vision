@@ -30,9 +30,9 @@ runtime:
   max_runtime_s: 0                # 0 持续运行；正值用于有界采集/调试
 # 不另设 enabled；任一模块 debug=true 才创建显示会话。
 display:
-  backend: sdl                    # sdl 实时图像、RRD 仅存数值；rerun 图像和曲线。
+  backend: sdl                    # sdl 仅实时窗口；rerun 图像、曲线和RRD。
   image_encoding: jpeg            # 仅 rerun：jpeg / bgr。
   hud_encoding: png               # 仅 rerun：png / bgra。
   spawn: true                     # 仅 rerun 后端：本机启动 Viewer；无桌面/远程机器设 false。
-  # recording: debug.rrd          # 可选，相对本配置；默认写入本次输出目录。
+  # recording: debug.rrd          # 仅rerun：相对本配置；默认写入本次输出目录。
   # address: rerun+http://192.168.1.10:9876/proxy  # 远程 Viewer 地址。

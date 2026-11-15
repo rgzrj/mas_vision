@@ -19,18 +19,38 @@ void ShootDebug::draw(const TrackResult &track, const std::optional<RuneShooter:
 
     const double processing_fps = update_fps();
     auto &display               = rm_utils::Display::getInstance();
-    display.scalar("shoot/valid", bool(aimed));
-    display.scalar("shoot/should_shoot", aimed && aimed->should_shoot);
-    if (aimed)
+    const bool values           = display.values_enabled();
+    const bool image_due        = display.image_due();
+    if (!values && !image_due)
+        return;
+
+    // 姿态同时供Rerun曲线和图像文字使用，只计算一次。
+    std::optional<std::pair<double, double>> gimbal_angles;
+    if (track.gimbal_orientation)
     {
-        display.scalar("shoot/yaw_rad", aimed->aim_yaw);
-        display.scalar("shoot/pitch_rad", aimed->aim_pitch);
-        display.scalar("shoot/flight_s", aimed->fly_time);
-        display.scalar("shoot/prediction_s", aimed->prediction_time);
-        display.point3d("world/attack", aimed->attack.x(), aimed->attack.y(), aimed->attack.z());
+        const Eigen::Vector3d forward = *track.gimbal_orientation * Eigen::Vector3d::UnitX();
+        gimbal_angles = std::pair{std::atan2(forward.y(), forward.x()),
+                                  std::atan2(-forward.z(), std::hypot(forward.x(), forward.y()))};
     }
-    else
-        clear();
+    if (values)
+    {
+        display.scalar("shoot/valid", bool(aimed));
+        display.scalar("shoot/should_shoot", aimed && aimed->should_shoot);
+        if (aimed)
+        {
+            display.scalar("shoot/yaw_rad", aimed->aim_yaw);
+            display.scalar("shoot/pitch_rad", aimed->aim_pitch);
+            display.scalar("shoot/flight_s", aimed->fly_time);
+            display.scalar("shoot/prediction_s", aimed->prediction_time);
+            display.point3d("world/attack", aimed->attack.x(), aimed->attack.y(), aimed->attack.z());
+        }
+        else
+            clear();
+        display.scalar("shoot/gimbal_yaw_rad", gimbal_angles ? gimbal_angles->first : NAN);
+        display.scalar("shoot/gimbal_pitch_rad", gimbal_angles ? gimbal_angles->second : NAN);
+    }
+    if (!image_due)
+        return;
 
     std::vector<rm_utils::DisplayText> texts;
     texts.push_back({rm_utils::processing_fps_text(processing_fps), 10, 8, 15, {255, 255, 0, 255}});
@@ -44,21 +64,13 @@ void ShootDebug::draw(const TrackResult &track, const std::optional<RuneShooter:
 
     // 云台姿态来自本帧配对 IMU，pitch 向下为正，与火控输出一致。
     // 普通离线视频没有这份观测，显示 N/A，不能拿固定外参或目标角冒充当前云台角。
-    std::optional<std::pair<double, double>> gimbal_angles;
-    if (track.gimbal_orientation)
+    if (gimbal_angles)
     {
-        const Eigen::Vector3d forward = *track.gimbal_orientation * Eigen::Vector3d::UnitX();
-        gimbal_angles                 = std::pair{std::atan2(forward.y(), forward.x()),
-                                  std::atan2(-forward.z(), std::hypot(forward.x(), forward.y()))};
-        display.scalar("shoot/gimbal_yaw_rad", gimbal_angles->first);
-        display.scalar("shoot/gimbal_pitch_rad", gimbal_angles->second);
         texts.push_back(
             {angle_text("Gimbal(frame)", gimbal_angles->first, gimbal_angles->second), 10, 26, 20, {0, 255, 255, 255}});
     }
     else
     {
-        display.scalar("shoot/gimbal_yaw_rad", NAN);
-        display.scalar("shoot/gimbal_pitch_rad", NAN);
         texts.push_back({"Gimbal(frame): N/A", 10, 26, 20, {200, 200, 200, 255}});
     }
 
@@ -102,6 +114,8 @@ void ShootDebug::draw(const TrackResult &track, const std::optional<RuneShooter:
 void ShootDebug::clear()
 {
     auto &display = rm_utils::Display::getInstance();
+    if (!display.values_enabled())
+        return;
     display.scalar("shoot/valid", 0);
     display.scalar("shoot/should_shoot", 0);
     for (const char *name : {"yaw_rad", "pitch_rad", "flight_s", "prediction_s", "gimbal_yaw_rad", "gimbal_pitch_rad"})

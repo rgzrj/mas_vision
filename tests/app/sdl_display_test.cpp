@@ -52,8 +52,10 @@ int main(int argc, char **argv)
         const auto output = argc > 1 ? tests::argument_path(argv[1]) : temporary.path;
         std::filesystem::create_directories(output);
         auto &display = rm_utils::Display::getInstance();
-        const auto file = output / "sdl_numeric.rrd";
-        display.start(false, tool::utf8(file), {}, "sdl");
+        const auto file = output / "sdl_must_not_record.rrd";
+        display.start(false, tool::utf8(file), "unused-rerun-address", "sdl", "unused", "unused");
+        require(!display.values_enabled() && !display.image_due() && !std::filesystem::exists(file),
+                "SDL initialized Rerun, recorded a file or drew before set_time");
         require(display.image_due(0, std::nullopt) && !display.image_due(.001, 0.) &&
                     !display.image_due(.02, 0.) && display.image_due(.04, 0.) && display.image_due(0, 1.),
                 "SDL image submission is not sampled at 30Hz or cannot rewind");
@@ -62,6 +64,7 @@ int main(int argc, char **argv)
         cv::Mat track(240, 320, CV_8UC3, cv::Scalar(40, 50, 60));
         cv::Mat shoot(240, 320, CV_8UC3, cv::Scalar(70, 80, 90));
         display.set_time(0);
+        require(display.image_due(), "First SDL frame was not selected before preparing overlays");
         display.points2d("detect/image/raw_pose", {{100, 100}}, {"raw P0"});
         display.display_add("shoot", shoot, {}, {}, {}, 320);
         display.display_add("track", track, {}, {}, {}, 320);
@@ -89,8 +92,9 @@ int main(int argc, char **argv)
                 "SDL modified the original image");
         cv::imwrite(tool::utf8(output / "detect_window.png"), first);
 
-        // 采样间隔内不提交新图；图像跳过不影响数值记录。
+        // 采样间隔内可提前跳过图元准备；SDL不记录数值。
         display.set_time(.001);
+        require(!display.image_due() && !display.values_enabled(), "Sampled SDL frame still requests debug work");
         display.display_add("detect", cv::Mat::zeros(detect.size(), detect.type()), {}, {}, {}, 320);
         display.scalar("test/value", 0);
         display.end_frame();
@@ -156,8 +160,8 @@ int main(int argc, char **argv)
         key(SDLK_q);
         require(controls.quit, "Window keyboard did not quit playback");
         display.shutdown();
-        require(visible_windows() == 0 && std::filesystem::file_size(file) > 100,
-                "Shutdown leaked windows or lost numeric RRD data");
+        require(visible_windows() == 0 && !std::filesystem::exists(file),
+                "Shutdown leaked windows or SDL created an RRD file");
 
         // 三个 debug 开关的全部 8 种组合；即便错误提交了禁用模块，也不得打开它。
         const std::array<const char *, 3> names{"detect", "track", "shoot"};

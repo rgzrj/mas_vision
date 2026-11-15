@@ -10,12 +10,16 @@ void DetectDebug::draw(const cv::Mat &bgr_img, const std::vector<Armor> &armors,
 
     const double fps = update_fps();
     auto &display    = rm_utils::Display::getInstance();
+    if (display.values_enabled())
+    {
+        display.scalar("armor/detect/count/armors", armors.size());
+        display.scalar("armor/detect/count/lights", lights.size());
+    }
+    if (!display.image_due())
+        return;
     std::vector<rm_utils::DisplayPoint> points;
     std::vector<rm_utils::DisplayLine> lines;
     std::vector<rm_utils::DisplayText> texts;
-
-    display.scalar("armor/detect/count/armors", armors.size());
-    display.scalar("armor/detect/count/lights", lights.size());
 
     // 灯条观测：绿色旋转矩形，红色中心点。
     for (const auto &light : lights)
@@ -133,6 +137,8 @@ void DetectDebug::draw(const cv::Mat &bgr_img, const std::vector<Armor> &armors,
 void DetectDebug::clear()
 {
     auto &display = rm_utils::Display::getInstance();
+    if (!display.values_enabled())
+        return;
     display.scalar("armor/detect/count/armors", 0);
     display.scalar("armor/detect/count/lights", 0);
 }

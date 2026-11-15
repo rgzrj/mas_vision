@@ -73,7 +73,8 @@ class Display
     Display &operator=(const Display &) = delete;
     ~Display();
 
-    // rerun 默认启动 Viewer；sdl 只显示本机画面。file 非空时同时写 RRD（SDL 下仅数值）。
+    // 两个后端互斥：sdl只显示本机画面；rerun管理Viewer、连接和RRD。
+    // spawn/file/address/image_encoding/hud_encoding仅供rerun使用，sdl忽略。
     // start/shutdown/poll由主线程调用；图元和end_frame由同一算法/预览生产者调用。
     void start(bool spawn = true, const std::string &file = {}, const std::string &address = {},
                const std::string &backend = "rerun", const std::string &image_encoding = "jpeg",
@@ -91,6 +92,10 @@ class Display
     }
     // 提交端在复制图像前询问；采样策略由所选后端统一决定，不推进显示线程时间线。
     bool image_due(double seconds, std::optional<double> last_image_time) const;
+    // set_time之后查询本帧是否需要图像；在组织文字、点线和投影前调用。
+    bool image_due() const;
+    // 只有Rerun记录数值；SDL调用方直接跳过曲线数据的整理。
+    bool values_enabled() const;
 
     // SDL：一帧所有模块提交后发布任务，主线程取最新一组再做实际绘制。
     // Rerun 后端下两者为空操作。

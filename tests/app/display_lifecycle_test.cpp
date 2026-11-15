@@ -15,7 +15,8 @@ int main()
             SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
             tests::TemporaryDirectory temporary;
             const auto config = temporary.path / "display.yaml";
-            std::ofstream(config) << "display: {backend: sdl, spawn: false}\n";
+            std::ofstream(config) << "display: {backend: sdl, recording: unwanted/debug.rrd, "
+                                     "spawn: unused, address: unused, image_encoding: unused, hud_encoding: unused}\n";
             auto &display = rm_utils::Display::getInstance();
             display.start(config, temporary.path / "output");
             display.select_layout("disabled");
@@ -44,7 +45,24 @@ int main()
                     require(std::string(SDL_GetWindowTitle(window)) == "mas_vision | HikCamera", "Wrong module window");
                 }
             require(windows == 1, "Module did not create exactly one independent window");
+            require(!display.values_enabled() && !std::filesystem::exists(temporary.path / "unwanted"),
+                    "SDL parsed Rerun settings or created a recording directory");
             display.shutdown();
             require(SDL_WasInit(SDL_INIT_VIDEO) == 0, "Shutdown retained SDL resources");
+
+            // 切换后端重新开始独立会话；Rerun不初始化SDL，图像采样不截断曲线。
+            const auto recording = temporary.path / "rerun.rrd";
+            display.start(false, recording.string(), {}, "rerun");
+            require(display.values_enabled() && SDL_WasInit(SDL_INIT_VIDEO) == 0,
+                    "Rerun initialized SDL or disabled numeric recording");
+            display.set_time(0);
+            display.scalar("test/value", 1);
+            display.set_time(.001);
+            require(!display.image_due() && display.values_enabled(), "Rerun sampled out numeric records");
+            display.scalar("test/value", 2);
+            display.shutdown();
+            require(std::filesystem::is_regular_file(recording) && std::filesystem::file_size(recording) > 0 &&
+                        !display.values_enabled() && !display.image_due(),
+                    "Rerun recording or session cleanup failed");
         });
 }

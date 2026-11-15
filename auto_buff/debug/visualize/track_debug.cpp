@@ -17,27 +17,32 @@ void TrackDebug::draw(const TrackResult &result, const cv::Mat &image)
 
     const double processing_fps = update_fps();
     auto &display               = rm_utils::Display::getInstance();
-    display.scalar("track/initialized", result.initialized);
-    display.scalar("track/observed", result.observed);
-    display.scalar("track/ready", result.ready);
-    display.scalar("track/matched", double(result.matched.size()));
-    if (result.initialized)
+    if (display.values_enabled())
     {
-        const auto &state = result.state;
-        display.scalar("track/angle_rad", state.rotation_angle);
-        display.scalar("track/speed_rad_s", state.rotation_speed);
-        display.scalar("track/fit_error", state.prediction_cost);
-        display.scalar("track/sine_valid", state.sine_valid);
-        constexpr std::array names{"x_m", "y_m", "z_m", "omega_rad_s", "theta_rad", "face_yaw_rad"};
-        for (std::size_t i = 0; i < names.size(); ++i)
+        display.scalar("track/initialized", result.initialized);
+        display.scalar("track/observed", result.observed);
+        display.scalar("track/ready", result.ready);
+        display.scalar("track/matched", double(result.matched.size()));
+        if (result.initialized)
         {
-            display.scalar(std::string("track/ekf/") + names[i], result.ekf.state[i]);
-            display.scalar(std::string("track/ekf/P_diag/") + names[i], result.ekf.variance[i]);
+            const auto &state = result.state;
+            display.scalar("track/angle_rad", state.rotation_angle);
+            display.scalar("track/speed_rad_s", state.rotation_speed);
+            display.scalar("track/fit_error", state.prediction_cost);
+            display.scalar("track/sine_valid", state.sine_valid);
+            constexpr std::array names{"x_m", "y_m", "z_m", "omega_rad_s", "theta_rad", "face_yaw_rad"};
+            for (std::size_t i = 0; i < names.size(); ++i)
+            {
+                display.scalar(std::string("track/ekf/") + names[i], result.ekf.state[i]);
+                display.scalar(std::string("track/ekf/P_diag/") + names[i], result.ekf.variance[i]);
+            }
+            display.point3d("world/rotation_center", state.x, state.y, state.z);
         }
-        display.point3d("world/rotation_center", state.x, state.y, state.z);
+        else
+            clear(); // 丢失后不沿用上一帧的空间点、状态或协方差曲线。
     }
-    else
-        clear(); // 丢失后不沿用上一帧的空间点、状态或协方差曲线。
+    if (!display.image_due())
+        return;
     std::vector<rm_utils::DisplayText> texts;
     std::vector<rm_utils::DisplayPoint> points;
     std::vector<rm_utils::DisplayLine> lines;
@@ -126,6 +131,8 @@ void TrackDebug::draw(const TrackResult &result, const cv::Mat &image)
 void TrackDebug::clear()
 {
     auto &display = rm_utils::Display::getInstance();
+    if (!display.values_enabled())
+        return;
     for (const char *name : {"initialized", "observed", "ready", "matched"})
         display.scalar(std::string("track/") + name, 0);
     for (const char *name : {"angle_rad", "speed_rad_s", "fit_error"})

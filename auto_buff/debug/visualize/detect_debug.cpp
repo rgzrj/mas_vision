@@ -39,7 +39,11 @@ void DetectDebug::draw(const Detection &detection, const cv::Mat &image)
         return;
 
     const double processing_fps = update_fps();
-    log_raw_pose(detection.raw_poses, detection, "detect");
+    auto &display               = rm_utils::Display::getInstance();
+    if (display.values_enabled())
+        log_raw_pose(detection.raw_poses, detection, "detect");
+    if (!display.image_due())
+        return;
 
     std::vector<rm_utils::DisplayText> texts;
     std::vector<rm_utils::DisplayPoint> points;
@@ -141,7 +145,8 @@ void DetectDebug::draw(const Detection &detection, const cv::Mat &image)
 
 void DetectDebug::clear()
 {
-    log_raw_pose({}, Detection{}, "detect");
+    if (rm_utils::Display::getInstance().values_enabled())
+        log_raw_pose({}, Detection{}, "detect");
 }
 
 } // namespace auto_buff

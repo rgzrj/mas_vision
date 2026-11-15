@@ -1,4 +1,5 @@
 /.deps/
+/.cache/
 /build*/
 /output/
 /tests/data/output/

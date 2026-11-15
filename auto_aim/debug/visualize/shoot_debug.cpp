@@ -13,7 +13,9 @@ void ShootDebug::draw(const cv::Mat &bgr_img, const std::optional<Target> &targe
         return;
 
     plot(packet);
-    const double fps          = update_fps();
+    const double fps = update_fps();
+    if (!rm_utils::Display::getInstance().image_due())
+        return;
     const auto gimbal         = rm_utils::eulers(R_gimbal2world, 2, 1, 0);
     const double gimbal_yaw   = gimbal[0];
     const double gimbal_pitch = gimbal[1];
@@ -127,6 +129,8 @@ void ShootDebug::draw(const cv::Mat &bgr_img, const std::optional<Target> &targe
 void ShootDebug::plot(const SendPacket &packet)
 {
     auto &display = rm_utils::Display::getInstance();
+    if (!display.values_enabled())
+        return;
     display.scalar("armor/shoot/angles/yaw_rad", packet.target_yaw);
     display.scalar("armor/shoot/angles/pitch_rad", packet.target_pitch);
     display.scalar("armor/shoot/state/fire", packet.fire_advice);

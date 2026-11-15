@@ -5,12 +5,12 @@
 namespace rm_utils
 {
 
-// 只负责 SDK、Viewer 和 RRD。SDL 使用它录制数值时，不提交图像和二维图元。
+// 独立的Rerun后端，负责SDK、Viewer、图像、曲线和RRD；SDL不使用本类。
 // 由 Display 串行调用；不创建第二个调试工作线程。
 class RerunDisplay
 {
 public:
-    RerunDisplay(bool images, bool spawn, const std::string &file, const std::string &address,
+    RerunDisplay(bool spawn, const std::string &file, const std::string &address,
                  const std::string &image_encoding, const std::string &hud_encoding);
     ~RerunDisplay();
     void flush();

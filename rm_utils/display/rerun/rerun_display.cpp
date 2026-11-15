@@ -17,24 +17,23 @@ struct RerunDisplay::Impl
 {
     std::unique_ptr<rerun::RecordingStream> recording;
     double frame_time = NAN;
-    bool images = false, shared_image = false, image_logged = false, raw_image = false, raw_hud = false;
+    bool shared_image = false, image_logged = false, raw_image = false, raw_hud = false;
     std::vector<std::uint8_t> jpeg, png;
     std::unordered_map<std::string, cv::Mat> hud_buffers;
     std::unordered_map<std::string, int> hud_heights;
     std::uint64_t image_logs = 0, hud_logs = 0, image_bytes = 0, hud_bytes = 0;
 };
 
-RerunDisplay::RerunDisplay(bool images, bool spawn, const std::string &file, const std::string &address,
+RerunDisplay::RerunDisplay(bool spawn, const std::string &file, const std::string &address,
                            const std::string &image_encoding, const std::string &hud_encoding)
     : impl_(std::make_unique<Impl>())
 {
-    // images=false用于SDL会话的数值落盘；不得启动Viewer或连接图像数据流。
-    if (images && image_encoding != "jpeg" && image_encoding != "bgr")
+    if (image_encoding != "jpeg" && image_encoding != "bgr")
         throw std::runtime_error("display.image_encoding must be jpeg or bgr");
-    if (images && hud_encoding != "png" && hud_encoding != "bgra")
+    if (hud_encoding != "png" && hud_encoding != "bgra")
         throw std::runtime_error("display.hud_encoding must be png or bgra");
     auto recording = std::make_unique<rerun::RecordingStream>("mas_vision");
-    if (images && spawn && address.empty())
+    if (spawn && address.empty())
     {
         rerun::SpawnOptions options;
         options.memory_limit = "2GiB";
@@ -57,11 +56,7 @@ RerunDisplay::RerunDisplay(bool images, bool spawn, const std::string &file, con
         }
     }
     const auto url = address.empty() ? "rerun+http://127.0.0.1:9876/proxy" : address;
-    if (!images)
-    {
-        recording->save(file).throw_on_failure(); // SDL 仅录制数值，不创建 Viewer/图像编码器。
-    }
-    else if (!file.empty() && (spawn || !address.empty()))
+    if (!file.empty() && (spawn || !address.empty()))
         recording->set_sinks(rerun::FileSink{file}, rerun::GrpcSink{url}).throw_on_failure();
     else if (!file.empty())
         recording->save(file).throw_on_failure();
@@ -71,7 +66,6 @@ RerunDisplay::RerunDisplay(bool images, bool spawn, const std::string &file, con
         throw std::runtime_error("Rerun needs a Viewer, address or recording file");
     recording->log_static("world", rerun::ViewCoordinates::FLU);
     impl_->recording = std::move(recording);
-    impl_->images = images;
     impl_->raw_image = image_encoding == "bgr";
     impl_->raw_hud = hud_encoding == "bgra";
 }
@@ -81,10 +75,9 @@ RerunDisplay::~RerunDisplay() = default;
 void RerunDisplay::flush()
 {
     impl_->recording->flush_blocking(5).throw_on_failure();
-    if (impl_->images)
-        std::cout << "Rerun submitted: images=" << impl_->image_logs
-                  << ", hud=" << impl_->hud_logs << ", image_bytes=" << impl_->image_bytes
-                  << ", hud_bytes=" << impl_->hud_bytes << " (SDK input, not Viewer FPS)\n";
+    std::cout << "Rerun submitted: images=" << impl_->image_logs
+              << ", hud=" << impl_->hud_logs << ", image_bytes=" << impl_->image_bytes
+              << ", hud_bytes=" << impl_->hud_bytes << " (SDK input, not Viewer FPS)\n";
 }
 
 void RerunDisplay::layout(const std::vector<DisplayView> &views, std::span<const unsigned char> blueprint)

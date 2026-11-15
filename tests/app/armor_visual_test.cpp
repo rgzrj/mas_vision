@@ -35,6 +35,7 @@ std::vector<Panel> panels;
 std::vector<rm_utils::DisplayView> views;
 std::map<std::string, double> series;
 std::size_t scalar_calls = 0;
+bool draw_image = true, record_values = true;
 bool text_contains(const Panel &panel, const std::string &value)
 {
     return std::any_of(panel.texts.begin(), panel.texts.end(),
@@ -70,6 +71,8 @@ bool Display::image_due(double, std::optional<double>) const
 {
     return true;
 }
+bool Display::image_due() const { return draw_image; }
+bool Display::values_enabled() const { return record_values; }
 void Display::points2d(const std::string &, const std::vector<cv::Point2d> &, const std::vector<std::string> &) {}
 void Display::point3d(const std::string &, double, double, double) {}
 std::string processing_fps_text(double value)
@@ -336,6 +339,41 @@ int main()
                 require(series.at("track/ready") == 0 && std::isnan(series.at("track/ekf/x_m")) &&
                             series.at("shoot/should_shoot") == 0 && std::isnan(series.at("shoot/yaw_rad")),
                         "Invalid buff state retained old curves or firing advice");
+
+                // SDL只准备采样帧的图元；Rerun在图像跳过时仍保留数值。
+                const auto draw_stages = [&]
+                {
+                    detect_view.draw(image, armors, lights);
+                    track_view.draw(overlay, image);
+                    auto_aim::TrackDebug(true).draw(image, armors, tracker);
+                    pose_view.draw(image, armors, pose);
+                    auto_buff::ShootDebug(true).draw(track, {}, image);
+                    auto_aim::ShootDebug(true).draw(image, {}, {}, point, pose.Get_R_gimbal2world());
+                    auto_buff::DetectDebug(true).draw(detection, image);
+                };
+                auto before_panels = panels.size();
+                const auto before_values = scalar_calls;
+                draw_image = record_values = false;
+                draw_stages();
+                auto_buff::DetectDebug::clear();
+                auto_buff::TrackDebug::clear();
+                auto_buff::ShootDebug::clear();
+                auto_aim::DetectDebug::clear();
+                auto_aim::TrackDebug::clear();
+                auto_aim::ShootDebug::clear();
+                require(panels.size() == before_panels && scalar_calls == before_values,
+                        "Sampled-out SDL frame still submitted images or Rerun numbers");
+                draw_image = true;
+                draw_stages();
+                require(panels.size() == before_panels + 7 && scalar_calls == before_values,
+                        "SDL lost a debug window or submitted Rerun values");
+                before_panels = panels.size();
+                draw_image = false;
+                record_values = true;
+                draw_stages();
+                require(panels.size() == before_panels && scalar_calls > before_values,
+                        "Rerun image sampling suppressed curves or prepared an image");
+                draw_image = true;
             }
         });
 }

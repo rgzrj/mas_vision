@@ -60,8 +60,6 @@ void Display::start(bool spawn, const std::string &file, const std::string &addr
 {
     if (backend != "rerun" && backend != "sdl")
         throw std::runtime_error("display.backend must be rerun or sdl");
-    if (backend == "sdl" && !address.empty())
-        throw std::runtime_error("SDL uses a local window; remove display.address");
     {
         std::lock_guard lock(impl_->mutex);
         if (impl_->sdl || impl_->rerun)
@@ -72,8 +70,8 @@ void Display::start(bool spawn, const std::string &file, const std::string &addr
     // start只由主线程调用；启动Viewer期间不占提交锁，算法线程可以继续处理。
     auto sdl = backend == "sdl" ? std::make_unique<SdlDisplay>() : nullptr;
     std::unique_ptr<RerunDisplay> rerun;
-    if (!sdl || !file.empty())
-        rerun = std::make_unique<RerunDisplay>(!sdl, spawn, file, address, image_encoding, hud_encoding);
+    if (!sdl)
+        rerun = std::make_unique<RerunDisplay>(spawn, file, address, image_encoding, hud_encoding);
     std::lock_guard lock(impl_->mutex);
     impl_->sdl = std::move(sdl);
     impl_->rerun = std::move(rerun);
@@ -100,17 +98,25 @@ void Display::start(const std::filesystem::path &config_path, const std::filesys
 void Display::start(const YAML::Node &settings, const std::filesystem::path &config_path,
                     const std::filesystem::path &output)
 {
-    const auto value = settings["recording"].as<std::string>("");
-    auto file        = value.empty() ? (output.empty() ? std::filesystem::path{} : output / "debug.rrd")
-                                     : config_path.parent_path() / value;
-    if (!file.empty())
-    {
-        file = std::filesystem::absolute(file).lexically_normal();
-        std::filesystem::create_directories(file.parent_path());
-    }
     const auto backend = settings["backend"].as<std::string>("sdl");
-    start(settings["spawn"].as<bool>(true), file.string(), settings["address"].as<std::string>(""), backend,
-          settings["image_encoding"].as<std::string>("jpeg"), settings["hud_encoding"].as<std::string>("png"));
+    std::filesystem::path file;
+    // SDL不解析录制路径、不创建目录，也不构造Rerun会话。
+    if (backend == "rerun")
+    {
+        const auto value = settings["recording"].as<std::string>("");
+        file = value.empty() ? (output.empty() ? std::filesystem::path{} : output / "debug.rrd")
+                             : config_path.parent_path() / value;
+        if (!file.empty())
+        {
+            file = std::filesystem::absolute(file).lexically_normal();
+            std::filesystem::create_directories(file.parent_path());
+        }
+    }
+    if (backend == "sdl")
+        start(false, {}, {}, backend);
+    else
+        start(settings["spawn"].as<bool>(true), file.string(), settings["address"].as<std::string>(""), backend,
+              settings["image_encoding"].as<std::string>("jpeg"), settings["hud_encoding"].as<std::string>("png"));
     std::cout << "Debug display: " << backend << '\n';
     if (!file.empty())
         std::cout << "Debug recording: " << file.string() << '\n';
@@ -122,6 +128,8 @@ void Display::shutdown() noexcept
     auto rerun = std::move(impl_->rerun);
     impl_->sdl.reset(); // 与初始化、poll 同属主线程；BuffDebug 须先退出。
     impl_->draw = false;
+    impl_->frame_time = NAN;
+    impl_->last_image_time.reset();
     impl_->deferred_start = false;
     impl_->layouts.clear();
     impl_->selected_layout.clear();
@@ -143,6 +151,18 @@ bool Display::image_due(double seconds, std::optional<double> last_image_time) c
 {
     std::lock_guard lock(impl_->mutex);
     return impl_->image_due(seconds, last_image_time);
+}
+
+bool Display::image_due() const
+{
+    std::lock_guard lock(impl_->mutex);
+    return impl_->draw;
+}
+
+bool Display::values_enabled() const
+{
+    std::lock_guard lock(impl_->mutex);
+    return bool(impl_->rerun);
 }
 
 void Display::end_frame()

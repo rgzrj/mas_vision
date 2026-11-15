@@ -105,7 +105,7 @@ check_pairs.py通过replay的--validate选项复用生产配对校验，不打�
 
 ## 6. 调试和输出
 
-各模块debug控制显示提交，auto_buff.yaml中的display.backend选择sdl或rerun。实机按当前armor/buff切换对应布局，各模块独立SDL窗口；Rerun沿用共享底图布局，避免重复编码。关闭某个窗口不等于停用算法。SDL图像在提交前按30 Hz采样，算法线程只交图像引用和图元，实际绘制由主线程完成；窗口中的Process FPS仍表示算法处理速度。
+各模块debug控制显示提交，auto_buff.yaml中的display.backend选择sdl或rerun。实机按当前armor/buff切换对应布局，各模块独立SDL窗口；Rerun沿用共享底图布局，避免重复编码。关闭某个窗口不等于停用算法。SDL图像在提交前按30 Hz采样，领域Debug在采样后才准备图元，算法线程只交图像引用和图元，实际绘制由主线程完成；窗口中的Process FPS仍表示算法处理速度。
 
 Rerun Viewer为单独程序。需要时在共享环境安装与C++ SDK一致的版本：
 
@@ -113,7 +113,7 @@ Rerun Viewer为单独程序。需要时在共享环境安装与C++ SDK一致的�
 "${XDG_DATA_HOME:-$HOME/.local/share}/mas-vision/venv/bin/python" -m pip install rerun-sdk==0.41.0
 ```
 
-SDL模式不需要启动Viewer。比赛时将各模块debug设为false，不创建显示会话、不准备调试图元，日志继续记录。下次调试只需修改YAML，无需重新编译。回放不导出标注视频，录像只在独立record程序进行。
+两个显示后端互斥：SDL只维护本机窗口，不创建Rerun会话、不提交数值或写入RRD；Rerun独立管理Viewer、图像、曲线和RRD。display中的spawn、address、recording及编码选项仅用于Rerun。比赛时将各模块debug设为false，不创建显示会话、不准备调试图元，日志继续记录。下次调试只需修改YAML，无需重新编译。回放不导出标注视频，录像只在独立record程序进行。
 
 装甲板恢复MAS原有窗口：HikCamera（检测）、HikCamera_track、HikCamera_track_pose、HikCamera_shoot。track使用armor_track_debug，pose使用armor_pose_debug并随track开启。track/shoot的plotter_enable与图像debug独立，继续向本机UDP 9870输出原诊断字段；track包含未进入tracking时也能采集的原始四角点和同帧R_gimbal2world。若比赛不需要UDP诊断，单独关闭这两个plotter_enable。
 

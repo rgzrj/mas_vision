@@ -7,7 +7,7 @@ namespace auto_aim
 {
 void PoseDebug::draw(const cv::Mat &bgr_img, const std::vector<Armor> &armors, const ArmorPose &pose)
 {
-    if (!enabled() || bgr_img.empty())
+    if (!enabled() || bgr_img.empty() || !rm_utils::Display::getInstance().image_due())
         return;
 
     std::vector<rm_utils::DisplayPoint> points;

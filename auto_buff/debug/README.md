@@ -12,8 +12,8 @@
 
 开关分别为 `auto_buff.detect.debug`、`auto_buff.track.debug`、`auto_buff.shoot.debug`。算法在构造时读取配置，显示后端继续由公共 `Display` 根据 `display.backend` 选择 SDL 或 Rerun。SDL 为 detect、track、shoot 三个独立窗口，事件由主线程 `Display::poll()` 处理。
 
-检测公共入口按“后端计算 → 模式/颜色过滤 → draw”执行。跟踪与火控在结果确定后绘制。图像只在调用期间借用，窗口编码和图元构建计入算法线程耗时；FPS 统计模块实际绘制调用频率，不代表 Viewer 上屏率或纯网络推理速度。
+检测公共入口按“后端计算 → 模式/颜色过滤 → draw”执行。跟踪与火控在结果确定后绘制。SDL在采样后持有只读图像引用，主线程负责纹理上传与绘制；图元只在本帧需要显示图像时构建。FPS在图像采样之前累计模块处理调用，不代表窗口刷新率或纯网络推理速度。
 
-实机线程和回放入口设置该帧曝光时间线，锁住整帧显示提交，并在各阶段完成后 `Display::end_frame()`。缺姿态或模式停用时，基类更新状态文字，子类 `clear()` 清理曲线和空间点；无效数值写 NaN，防止继续显示旧模型。检测原始候选序号只代表当前帧顺序，不是跨帧 ID。
+实机线程和回放入口设置该帧曝光时间线，锁住整帧显示提交，并在各阶段完成后 `Display::end_frame()`。SDL不创建RRD或整理Rerun数值；Rerun图像采样与逐帧数值记录分开。缺姿态或模式停用时，基类更新状态文字，子类 `clear()` 仅在Rerun会话中清理曲线和空间点；无效数值写 NaN，防止继续显示旧模型。检测原始候选序号只代表当前帧顺序，不是跨帧 ID。
 
 报告、标注视频和性能 CSV 不属于实时调试层。视频及姿态只由 `apps/record` 采集；`apps/replay` 只读取、运行生产算法和显示，输出简要运行统计。测速位于 `tests/tools/buff_profile.cpp` 与 `tests/tools/yolo_profile.cpp`。

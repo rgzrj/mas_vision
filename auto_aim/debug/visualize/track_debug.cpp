@@ -15,6 +15,8 @@ void TrackDebug::draw(const cv::Mat &bgr_img, const std::vector<Armor> &armors, 
     const auto &pose   = tracker.armor_pose();
     plot(target);
     const double fps = update_fps();
+    if (!rm_utils::Display::getInstance().image_due())
+        return;
 
     std::vector<rm_utils::DisplayPoint> points;
     std::vector<rm_utils::DisplayLine> lines;
@@ -213,6 +215,8 @@ void TrackDebug::draw(const cv::Mat &bgr_img, const std::vector<Armor> &armors, 
 void TrackDebug::plot(const std::optional<Target> &target)
 {
     auto &display = rm_utils::Display::getInstance();
+    if (!display.values_enabled())
+        return;
     display.scalar("armor/track/valid", target.has_value());
     // 下标必须与 EKF 的 11 维状态一致，路径按物理量分组。
     const char *paths[]{"position/x_m",         "velocity/vx_mps",      "position/y_m",     "velocity/vy_mps",
