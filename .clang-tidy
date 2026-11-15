@@ -1,0 +1,11 @@
+Checks: >-
+  -*,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-deadcode.*,
+  bugprone-use-after-move,
+  bugprone-dangling-handle,
+  bugprone-unused-raii
+WarningsAsErrors: 'clang-analyzer-core.*,clang-analyzer-cplusplus.*,bugprone-*'
+HeaderFilterRegex: '(^|[/\\])(app|auto_buff|threads|rm_utils)[/\\]'
+FormatStyle: file

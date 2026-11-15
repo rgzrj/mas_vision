@@ -1,0 +1,19 @@
+{
+  "source": "https://github.com/SZURPVision/RuneDetectionModel/blob/master/model/model-0624.onnx",
+  "sha256": "e6e6bddf1f793ece1b9b351b8db061dbb026d32b8a6d71cb39a8fd21ce9cb917",
+  "input": [
+    1,
+    3,
+    480,
+    640
+  ],
+  "output": [
+    1,
+    18,
+    6300
+  ],
+  "preprocess": "RGB f32 NCHW /255; centered letterbox 114",
+  "device": "CPU single stream",
+  "retrained": false,
+  "quantized_by_this_project": false
+}

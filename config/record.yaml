@@ -1,0 +1,11 @@
+# 独立采集：mas_vision_record；设备与算法快照均读取各自固定配置。
+recording:
+  pipeline: buff                   # 仅设置生成的回放默认算法；采集不运行算法
+  output_dir: ../output/record
+  storage: video                    # video：raw.avi；images：images/0.png、1.png……
+  fps: 80.0                         # 视频容器名义帧率；回放使用 CSV 中的真实曝光时间
+  queue_size: 32                    # 编码队列；满时停止并报告，退出前排空已接收记录
+runtime:
+  max_runtime_s: 0                  # 0 持续采集，Ctrl+C 退出；Viewer 独立暂停回看
+display:
+  enabled: true                    # 独立采集的预览开关；不运行 detect/track/shoot

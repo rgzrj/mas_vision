@@ -1,0 +1,10 @@
+serial:
+  port: "/dev/mascdc"
+  baudrate: 115200
+  timeout: 2
+  data_timeout_ms: 100
+  bytesize: 8
+  parity: "none"
+  stopbits: 1
+  flowcontrol: "none"
+  timestamp_offset: 0.0  # 秒，正值从主机接收时刻扣除，补偿串口/IMU传输延迟

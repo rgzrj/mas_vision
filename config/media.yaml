@@ -1,0 +1,12 @@
+# 普通媒体没有同步 IMU，只能检查固定相机条件下的算法表现。
+pipeline: buff
+input:
+  type: media
+  media_type: video                # image / video
+  path: ../tests/data/video/官方/符.avi
+algorithm_config: auto_buff.yaml
+output:
+  directory: ../output/replay
+playback:
+  speed: 1.0
+  display: true

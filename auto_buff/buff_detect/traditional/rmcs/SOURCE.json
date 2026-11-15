@@ -1,0 +1,42 @@
+{
+  "repository": "https://github.com/Alliance-Algorithm/rmcs_auto_aim_v2",
+  "thinning": {
+    "sha256": "b47e9413f2668aa5ebb1fab7f1486c9b98e68ab02d8584a3aa1bad041dcd67f4",
+    "version": "4.12.0",
+    "source": "https://raw.githubusercontent.com/opencv/opencv_contrib/4.12.0/modules/ximgproc/src/thinning.cpp"
+  },
+  "local_source": "D:\\vs\\vscode\\c++\\huge mas\\开源\\rmcs_auto_aim_v2-main",
+  "files": [
+    {
+      "sha256": "1c3b5b4f82e396d394c0c61a921742b845e519e7911033dc268c2655542a5b34",
+      "source": "src/utility/robot/color.hpp",
+      "destination": "auto_buff/buff_types.hpp"
+    },
+    {
+      "sha256": "053ca677b7519503d87280a654999704b66d9f8ee4c46a5dafeac359bb0d89e5",
+      "source": "src/module/detector/rune.hpp",
+      "destination": "auto_buff/buff_detect/traditional/rmcs/rune.hpp"
+    },
+    {
+      "sha256": "b468fb961d42db2494b3d7483ed72aee526104b97a41c110702fa4dc28458ac8",
+      "source": "src/utility/image/process.hpp",
+      "destination": "auto_buff/buff_detect/traditional/process.hpp"
+    },
+    {
+      "sha256": "0d4efb096b01fe660ae7581b047432e6a1b35d0dec42ffc8125794a61fa69b55",
+      "source": "src/module/detector/rune.cpp",
+      "destination": "auto_buff/buff_detect/traditional/rmcs/rune.cpp"
+    },
+    {
+      "sha256": "86ab242b882e594a9160ea43e57142a2c7aa2218daf146e6c73aa11650f09155",
+      "source": "src/utility/image/process.cpp",
+      "destination": "auto_buff/buff_detect/traditional/process.cpp"
+    },
+    {
+      "sha256": "d415250801c46571ba8bb11b1587b46ecb00ac60c826050a2ee6bd19f1bc3ca5",
+      "source": "LICENSE",
+      "destination": "auto_buff/buff_detect/traditional/rmcs/LICENSE"
+    }
+  ],
+  "port_note": "CampColor belongs to auto_buff/buff_types.hpp; color extraction belongs to buff_detect/traditional/process. Source hashes identify the original upstream files."
+}

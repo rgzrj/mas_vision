@@ -1,0 +1,12 @@
+# ./build/mas_vision_replay config/replay.yaml
+pipeline: buff                     # armor / buff
+input:
+  type: paired                     # paired / media
+  path: ../output/record/请填写记录目录/raw.avi
+  frames_csv: ../output/record/请填写记录目录/frames.csv
+algorithm_config: ../output/record/请填写记录目录/auto_buff.yaml
+output:
+  directory: ../output/replay
+playback:
+  speed: 1.0                       # 0 不等待；算法时间始终来自输入
+  display: true

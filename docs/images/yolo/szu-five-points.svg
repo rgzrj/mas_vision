@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="500" viewBox="0 0 760 500">
+<rect width="760" height="500" fill="#101923"/>
+<g font-family="Microsoft YaHei, sans-serif" fill="#e8edf2">
+<text x="32" y="40" font-size="24">深大式五点：四个符板点 + R</text>
+<text x="32" y="70" font-size="15" fill="#acb9c6">示意图只说明点序；真实点应复核突出边缘暗亮交界。</text>
+<path d="M245 120 L135 215 L245 310 L355 215 Z" fill="#122d3c" stroke="#49c8dd" stroke-width="3"/>
+<path d="M245 350 L245 325" stroke="#8b9aab" stroke-width="3"/>
+<path d="M239 337 L245 325 L251 337" fill="none" stroke="#8b9aab" stroke-width="3"/>
+<circle cx="245" cy="215" r="5" fill="#8b9aab"/>
+<text x="264" y="220" font-size="16" fill="#8b9aab">C（几何辅助，不是网络点）</text>
+<g fill="#ffe65b"><circle cx="245" cy="120" r="8"/><circle cx="135" cy="215" r="8"/><circle cx="355" cy="215" r="8"/><circle cx="245" cy="310" r="8"/></g>
+<circle cx="245" cy="400" r="10" fill="#57f3a2"/>
+<text x="265" y="120" font-size="20">0 top（背离R）</text>
+<text x="32" y="200" font-size="20">1 left</text>
+<text x="372" y="198" font-size="20">3 right</text>
+<text x="266" y="315" font-size="20">4 bottom（朝向R）</text>
+<text x="270" y="407" font-size="20" fill="#57f3a2">2 R（机构旋转中心）</text>
+<text x="32" y="466" font-size="16">点序固定：top / left / R / right / bottom；所有类别共用。</text>
+</g></svg>

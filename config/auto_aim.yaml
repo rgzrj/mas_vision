@@ -1,0 +1,41 @@
+auto_aim:
+  armor_detector:
+    debug: false
+    binary_thres: 90
+    detect_color: RED
+    lights_params:
+      min_lightbar_ratio: 1.5 # 有效灯条长宽比（min）
+      max_lightbar_ratio: 20 # 有效灯条长宽比（max）
+      min_lightbar_length: 8 # 灯条长度（min）
+      max_angle_error: 45 # 角度误差（max）单位：度
+      max_lightbar_area: 30000 # 灯条最大面积（max）
+    armors_params:
+      min_armor_ratio: 1 # 装甲板长宽比（min）
+      max_armor_ratio: 5 # 装甲板长宽比（max）
+      max_side_ratio: 1.5 # 侧边长宽比（max）
+      max_rectangular_error: 25 # 角度误差（max）单位：度
+    number_params:
+      model_path: ../auto_aim/armor_detector/model/lenet.onnx
+      label_path: ../auto_aim/armor_detector/model/label.txt
+      classifier_threshold: 0.7
+      ignore_classes: ["negative"]
+  armor_track :
+    armor_pose_debug: false       # 原MAS位姿窗口；与track窗口一起用于坐标/重投影检查。
+    armor_track_debug: true       # 原MAS模型窗口，保留模型板编号、选中板和旋转中心。
+    plotter_enable: true          # 独立UDP诊断，含手眼角点与同帧R_gimbal2world；不开窗也可记录。
+    min_detect_count: 5
+    max_temp_lost_count: 25
+    outpost_max_temp_lost_count: 75
+  armor_shoot:
+    debug: false                   # 向共享显示后端提交 armor_shoot 图像和瞄准数据。
+    plotter_enable: true           # 恢复MAS原SendPacket、云台姿态、距离与瞄准点字段。
+    yaw_offset: 0.5                # 单位：度
+    pitch_offset: 1.0              # 单位：度
+    bullet_speed: 16.0             # 子弹初速度，单位：m/s
+    gravity: 9.81                  # 重力加速度，单位：m/s^2
+    resistance: 0.014              # 二次空气阻力系数，单位：1/m
+    fire_delay_time: 0.080         # 统一发弹延迟，单位：s
+    yaw_tolerance_near: 2.0        # yaw射击容差（距离<3m），单位：度
+    yaw_tolerance_far: 1.0         # yaw射击容差（距离>=3m），单位：度
+    pitch_tolerance_near: 2.0      # pitch射击容差（距离<3m），单位：度
+    pitch_tolerance_far: 1.0       # pitch射击容差（距离>=3m），单位：度

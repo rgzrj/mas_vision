@@ -1,0 +1,14 @@
+usbcamera:
+  enable: false          # 是否启用 USB 相机
+  device_path: /dev/video0  # USB 相机设备路径
+  width: 1280           # 图像宽度
+  height: 720            # 图像高度
+  fps: 30               # 帧率 
+  auto_exposure: 1       # 驱动原生曝光控制值，具体含义依后端/设备而定
+  exposure: 50            # 驱动原生曝光值，不当作微秒使用
+  gain: 20              # 增益 (仅在手动曝光模式下有效)
+  auto_wb: 0            # 自动白平衡 (0=禁用, 1=启用)
+
+  # 以下是时间戳补偿，独立于 exposure 的驱动单位；0 表示尚未补偿。
+  exposure_time_us: 0.0
+  transfer_latency_ms: 0.0

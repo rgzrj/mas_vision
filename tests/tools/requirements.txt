@@ -1,0 +1,2 @@
+openvino==2026.4.1
+netron==9.3.4

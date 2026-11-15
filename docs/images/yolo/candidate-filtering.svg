@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="735" viewBox="0 0 1080 735" role="img" aria-labelledby="title desc">
+  <title id="title">从网络候选到有效符板观测的过滤流程</title>
+  <desc id="desc">类别分数过滤后检查关键点分数与边界，至少三个有效点才能保留候选，再做中心距离去重。有效R独立收集；类别零和一的符板还需通过判色及中心几何，类别二当前仅提供R。至少三个有效点并不等于四端点完整。</desc>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8Z" fill="#526477"/></marker></defs>
+  <rect width="1080" height="735" rx="16" fill="#f5f8fc"/>
+  <g font-family="Microsoft YaHei, Noto Sans CJK SC, sans-serif" fill="#182c40">
+    <text x="40" y="44" font-size="25" font-weight="700">画出了五个点，不代表程序已经得到有效符板</text>
+    <text x="40" y="76" font-size="17">当前代码流程示意：每一步都可能减少候选；诊断计数需另行采集。</text>
+    <g stroke="#526477" stroke-width="2" fill="none" marker-end="url(#arrow)">
+      <path d="M365 163V187"/><path d="M365 259V283"/><path d="M365 355V379"/>
+      <path d="M365 451V474H230V497"/><path d="M365 474H705V497"/><path d="M705 569V597"/>
+      <path d="M730 320H815"/>
+    </g>
+    <g font-size="18">
+      <rect x="80" y="105" width="570" height="58" rx="10" fill="#e3edf9" stroke="#9bb2cc"/>
+      <text x="103" y="141">① 网络原始输出 → 类别分数是否过线？</text>
+      <rect x="80" y="187" width="570" height="72" rx="10" fill="white" stroke="#9bb2cc"/>
+      <text x="103" y="217">② 五个关键点分别检查</text>
+      <text x="103" y="243" font-size="17">分数过线＋坐标有限＋在原图内，才算该点有效</text>
+      <rect x="80" y="283" width="650" height="72" rx="10" fill="white" stroke="#9bb2cc"/>
+      <text x="103" y="313">③ 至少三个有效点？</text>
+      <text x="103" y="339" font-size="17">不足则丢弃候选；满足也不代表四端点已经完整</text>
+      <rect x="815" y="283" width="225" height="72" rx="10" fill="#fff0d8"/>
+      <text x="832" y="313" font-weight="700">例：阈值 0.80</text>
+      <text x="832" y="339" font-size="16">0.79会被过滤 ≠ 点很偏</text>
+      <rect x="80" y="379" width="570" height="72" rx="10" fill="white" stroke="#9bb2cc"/>
+      <text x="103" y="409">④ 中心距离去重</text>
+      <text x="103" y="435" font-size="17">类别0/1同组，类别2另组；R不作为符板中心</text>
+      <rect x="40" y="497" width="380" height="72" rx="10" fill="#e0f0e9" stroke="#7ba797"/>
+      <text x="63" y="527">有效R独立收集并合并近邻重复</text>
+      <text x="63" y="553" font-size="17">类别2当前到此，不生成符板观测</text>
+      <rect x="450" y="497" width="550" height="72" rx="10" fill="white" stroke="#9bb2cc"/>
+      <text x="473" y="527">类别0/1：原图ROI判色与颜色筛选</text>
+      <text x="473" y="553" font-size="17">判色失败或不符合所选颜色，符板被过滤</text>
+      <rect x="450" y="597" width="550" height="72" rx="10" fill="#e0f0e9" stroke="#7ba797"/>
+      <text x="473" y="627">中心几何 / 可选像素精修 → 有效符板观测</text>
+      <text x="473" y="653" font-size="17">中心可用、完整四端点可用，仍是不同条件</text>
+    </g>
+    <text x="40" y="706" font-size="17">排查时分别记录：网络候选、过线点、去重候选、R数量、符板数量；不要统称“YOLO漏检”。</text>
+  </g>
+</svg>
