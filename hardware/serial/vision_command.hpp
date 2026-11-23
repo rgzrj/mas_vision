@@ -14,11 +14,13 @@ class VisionCommand
 {
 public:
     using Clock = std::chrono::steady_clock;
+
     VisionState state() const
     {
         std::lock_guard lock(mutex_);
         return state_;
     }
+
     void set_mode(VisionMode mode)
     {
         std::lock_guard lock(mutex_);
@@ -28,6 +30,7 @@ public:
         ++state_.epoch;
         invalidate();
     }
+
     bool submit(VisionState source, Clock::time_point exposure, Clock::duration max_age, SendPacket packet)
     {
         std::lock_guard lock(mutex_);
@@ -45,6 +48,7 @@ public:
         deadline_          = exposure + max_age;
         return true;
     }
+
     SendPacket packet(Clock::time_point now)
     {
         std::lock_guard lock(mutex_);
@@ -52,19 +56,39 @@ public:
             invalidate();
         return packet_;
     }
+
+    /**
+     * @brief 开启新会话，丢弃旧快照。
+     * @details 该函数必须在持锁的情况下调用。
+     */
     void new_session()
     {
         std::lock_guard lock(mutex_);
         ++state_.epoch;
         invalidate();
     }
+
     void clear()
     {
         std::lock_guard lock(mutex_);
         invalidate();
     }
 
+    bool clear(VisionState source)
+    {
+        std::lock_guard lock(mutex_);
+        if (source.mode != state_.mode || source.epoch != state_.epoch)
+            return false;
+
+        invalidate();
+        return true;
+    }
+
 private:
+    /**
+     * @brief 清空发送快照，避免过期数据被误用。
+     * @details 该函数必须在持锁的情况下调用。
+     */
     void invalidate()
     {
         packet_.found       = false;

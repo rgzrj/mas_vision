@@ -8,7 +8,6 @@
 #include <atomic>
 #include <thread>
 #include <cmath>
-#include <iostream>
 extern std::atomic<bool> g_shutdown;
 namespace app
 {
@@ -72,7 +71,7 @@ try
         }
     } stop;
     const auto started = std::chrono::steady_clock::now();
-    std::cout << "Recording: " << tool::utf8(recorder.directory()) << '\n';
+    MAS_LOG_INFO("Recording: {}", tool::utf8(recorder.directory()));
     while (!g_shutdown)
     {
         recorder.check();
@@ -109,7 +108,7 @@ try
     display.shutdown();
     recorder.close();
     serial.closeSerial();
-    std::cout << "Session saved: " << tool::utf8(recorder.directory() / "replay.yaml") << '\n';
+    MAS_LOG_INFO("Session saved: {}", tool::utf8(recorder.directory() / "replay.yaml"));
     return 0;
 }
 catch (...)

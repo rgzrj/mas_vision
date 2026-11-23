@@ -4,72 +4,97 @@
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <iomanip>
 #include <sstream>
-#include <vector>
+#include <utility>
 
 namespace third_party
 {
 
-std::shared_ptr<spdlog::logger> MasLog::logger_ = spdlog::default_logger(); // 初始化为默认 logger，以防未初始化时使用
+namespace
+{
+const auto fallback = spdlog::default_logger();
+
+std::string make_log_path(const std::filesystem::path &path)
+{
+    const auto directory = path.parent_path();
+    if (!directory.empty() && !std::filesystem::exists(directory))
+        std::filesystem::create_directories(directory);
+
+    const auto now = std::time(nullptr);
+    std::ostringstream timestamp;
+    timestamp << std::put_time(std::localtime(&now), "%Y-%m-%d_%H%M%S");
+
+    return (directory / (path.stem().string() + "_" + timestamp.str() + path.extension().string())).string();
+}
+} // namespace
+
+std::shared_ptr<spdlog::logger> MasLog::logger_ = fallback;
 
 void MasLog::init(const std::string &log_path, spdlog::level::level_enum filelevel,
                   spdlog::level::level_enum consolelevel)
 {
+    shutdown();
+
     try
     {
-        // 生成带时间戳的文件名
-        std::filesystem::path p(log_path);
-        auto                  parent_path = p.parent_path();
-        if (!parent_path.empty() && !std::filesystem::exists(parent_path))
-        {
-            std::filesystem::create_directories(parent_path);
-        }
+        const auto file = make_log_path(log_path);
 
-        auto              now       = std::chrono::system_clock::now();
-        auto              in_time_t = std::chrono::system_clock::to_time_t(now);
-        std::stringstream ss;
-        ss << std::put_time(std::localtime(&in_time_t), "%Y-%m-%d_%H%M%S");
-
-        std::string filename       = p.stem().string() + "_" + ss.str() + p.extension().string();
-        std::string final_log_path = (parent_path / filename).string();
-
-        // 初始化线程池（用于异步日志）
-        spdlog::init_thread_pool(65536, 1);
-
-        // 创建控制台输出汇 (Color Console)，控制台级别
         auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_st>();
         console_sink->set_level(consolelevel);
 
-        // 创建基础文件输出汇，文件级别
-        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_st>(final_log_path, true);
+        auto file_sink = std::make_shared<spdlog::sinks::basic_file_sink_st>(file, true);
         file_sink->set_level(filelevel);
 
-        // 汇集两个输出汇
-        std::vector<spdlog::sink_ptr> sinks{console_sink, file_sink};
+        const std::array<spdlog::sink_ptr, 2> sinks{console_sink, file_sink};
 
-        // 5. 创建异步 Logger
-        logger_ = std::make_shared<spdlog::async_logger>(
-            "mas_logger", sinks.begin(), sinks.end(), spdlog::thread_pool(),
-            spdlog::async_overflow_policy::overrun_oldest);
+        // 文件可用后再启动日志工作线程；单工作线程独占两个 _st sink。
+        spdlog::init_thread_pool(65536, 1);
+        auto logger =
+            std::make_shared<spdlog::async_logger>("mas_logger", sinks.begin(), sinks.end(), spdlog::thread_pool(),
+                                                   spdlog::async_overflow_policy::overrun_oldest);
 
-        // 6. 设置 Logger 的总体级别：取文件和控制台中较低的级别（更详细的那个）
-        auto min_level = (filelevel < consolelevel) ? filelevel : consolelevel;
-        logger_->set_level(min_level);
-        // 格式优化: [时间] [等级] [文件:行号] 内容
-        logger_->set_pattern("[%H:%M:%S.%e] [%^%l%$] [%s:%#] %v");
-        // 刷新策略：每隔3秒自动刷新，或遇到 warn 级别立即刷新
+        logger->set_level(std::min(filelevel, consolelevel));
+        logger->set_pattern("[%H:%M:%S.%e] [%^%l%$] [%s:%#] %v");
+
         spdlog::flush_every(std::chrono::seconds(3));
-        logger_->flush_on(spdlog::level::warn);
-        // 注册为全局默认 logger
-        spdlog::set_default_logger(logger_);
+        logger->flush_on(spdlog::level::warn);
+
+        spdlog::set_default_logger(logger);
+        logger_ = std::move(logger);
+
+        // 统一处理正常退出和提前返回，注册一次即可。
+        static const bool registered = std::atexit(&MasLog::shutdown) == 0;
+        if (!registered)
+            std::fprintf(stderr, "Cannot register log shutdown\n");
+            
     }
     catch (const spdlog::spdlog_ex &ex)
     {
+        spdlog::shutdown();
+        logger_ = fallback;
+        spdlog::set_default_logger(logger_);
         std::fprintf(stderr, "Log initialization failed: %s\n", ex.what());
     }
+}
+
+void MasLog::shutdown()
+{
+    if (logger_ == fallback)
+        return;
+
+    // 刷新先于线程池销毁；之后恢复终端兜底，避免悬空的异步 logger。
+    logger_->flush();
+    spdlog::shutdown();
+    logger_ = fallback;
+    spdlog::set_default_logger(logger_);
 }
 
 } // namespace third_party

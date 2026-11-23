@@ -1,5 +1,5 @@
 #include "detect_debug.hpp"
-#include "auto_buff/buff_detect/detection.hpp"
+#include "auto_buff/buff_detect/buff_detector.hpp"
 #include "display.hpp"
 #include <iomanip>
 #include <sstream>
@@ -8,8 +8,24 @@ namespace auto_buff
 {
 namespace
 {
+// 外观标签仅供检测调试窗口使用。
+const char *appearance_name(Appearance value)
+{
+    switch (value)
+    {
+    case Appearance::full_mark:
+        return "pending";
+    case Appearance::single_ring:
+        return "single_ring";
+    case Appearance::big_activated:
+        return "big_activated";
+    default:
+        return "unknown";
+    }
+}
+
 // 保留原始分数供曲线诊断；完整原始坐标仍由帧报告保存，不重复叠在最终观测上。
-void log_raw_pose(const std::vector<PoseDetection> &objects, const Detection &result, const std::string &window_name)
+void log_raw_pose(const std::vector<PoseDetection> &objects, const BuffDetector::Detection &result, const std::string &window_name)
 {
     auto &display = rm_utils::Display::getInstance();
     // 候选序号只是当前帧排序，不代表跨帧目标 ID；R 分数与目标分类分数分别记录。
@@ -33,7 +49,7 @@ void log_raw_pose(const std::vector<PoseDetection> &objects, const Detection &re
 
 } // namespace
 
-void DetectDebug::draw(const Detection &detection, const cv::Mat &image)
+void DetectDebug::draw(const BuffDetector::Detection &detection, const cv::Mat &image)
 {
     if (!enabled() || image.empty())
         return;
@@ -74,7 +90,7 @@ void DetectDebug::draw(const Detection &detection, const cv::Mat &image)
         return out.str();
     };
 
-    const Marker *reference = nullptr;
+    const RuneIcon *reference = nullptr;
     for (const auto &marker : detection.markers)
     {
         if (!marker.observed)
@@ -103,7 +119,7 @@ void DetectDebug::draw(const Detection &detection, const cv::Mat &image)
         texts.push_back(
             {appearance_name(board.appearance), cvRound(board.center.x) + 8, cvRound(board.center.y) - 24, 20, color});
 
-        if (reference && (reference->color == CampColor::UNKNOWN || reference->color == board.color))
+        if (reference && (reference->color == EnemyColor::UNKNOWN || reference->color == board.color))
             lines.push_back({cvRound(reference->center.x),
                              cvRound(reference->center.y),
                              cvRound(board.center.x),
@@ -146,7 +162,7 @@ void DetectDebug::draw(const Detection &detection, const cv::Mat &image)
 void DetectDebug::clear()
 {
     if (rm_utils::Display::getInstance().values_enabled())
-        log_raw_pose({}, Detection{}, "detect");
+        log_raw_pose({}, BuffDetector::Detection{}, "detect");
 }
 
 } // namespace auto_buff

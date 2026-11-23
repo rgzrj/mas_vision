@@ -1,10 +1,10 @@
-#ifndef _ARMOR_DEBUG_H_
-#define _ARMOR_DEBUG_H_
+#pragma once
 
 #include "rm_utils/display/display.hpp"
 
 #include <chrono>
 #include <filesystem>
+#include <mutex>
 #include <opencv2/core/mat.hpp>
 #include <string>
 #include <vector>
@@ -16,21 +16,16 @@ class Node;
 
 namespace auto_aim
 {
-/**
- * @brief 装甲板调试基类
- * @details 各算法持有对应的调试子类，共用开关、窗口名、FPS 统计和图元提交。
- */
+// 管理装甲板调试窗口布局和实机单帧提交。
 class ArmorDebug
 {
 public:
-    bool enabled() const noexcept
-    {
-        return enabled_;
-    }
-    void set_enabled(bool enabled) noexcept
-    {
-        enabled_ = enabled;
-    }
+    explicit ArmorDebug(const std::filesystem::path &config);
+
+    // 锁随调用方的帧作用域释放，保证同一帧的绘制使用同一个时间戳。
+    std::unique_lock<std::mutex> begin_frame(std::chrono::steady_clock::time_point timestamp) const;
+    void pose_unavailable(const cv::Mat &image) const;
+    void end_frame() const;
 
     /**
      * @brief 读取各模块的图像调试开关
@@ -38,13 +33,6 @@ public:
      * @return 窗口位掩码，bit 0～3 分别对应 detect、track、shoot、pose；0 表示全部关闭
      */
     static unsigned enabled_views(const YAML::Node &config);
-
-    /**
-     * @brief 从配置文件读取调试开关，并注册实机窗口布局
-     * @param config_path 装甲板配置文件路径
-     * @return 已启用的窗口位掩码，供当前帧的显示控制使用
-     */
-    static unsigned configure_layout(const std::filesystem::path &config_path);
 
     /**
      * @brief 根据已启用的窗口设置布局
@@ -64,11 +52,28 @@ public:
     static void unavailable(const cv::Mat &image, unsigned views, const std::string &status,
                             bool include_detect = false);
 
+private:
+    unsigned views_;
+};
+
+// 各绘制子类共用窗口开关、FPS 统计和图元提交。
+class ArmorDebugBase
+{
+public:
+    bool enabled() const noexcept
+    {
+        return enabled_;
+    }
+    void set_enabled(bool enabled) noexcept
+    {
+        enabled_ = enabled;
+    }
+
 protected:
     /**
      * @brief 初始化当前模块的调试开关与窗口名
      */
-    ArmorDebug(bool enabled, const std::string &window_name);
+    ArmorDebugBase(bool enabled, const std::string &window_name);
 
     /**
      * @brief 更新本实例的处理帧率；首个统计周期不足一秒时返回 -1
@@ -77,7 +82,7 @@ protected:
 
     /**
      * @brief 将子类生成的文字、点和线提交到本实例的 Display 窗口
-     * @note 调试类不复制图像；Display在采样后持有只读图像引用直到显示完成
+     * @note 本方法将文字标记为HUD；不复制图像，Display持有只读图像引用直到显示完成
      */
     void show(const cv::Mat &image, std::vector<rm_utils::DisplayText> &texts,
               const std::vector<rm_utils::DisplayPoint> &points, const std::vector<rm_utils::DisplayLine> &lines) const;
@@ -93,5 +98,3 @@ private:
 };
 
 } // namespace auto_aim
-
-#endif // _ARMOR_DEBUG_H_

@@ -1,8 +1,9 @@
 #include "rune_model.hpp"
+
+#include "mas_log.hpp"
 #include "../pose/rune_pose.hpp"
 #include "../pose/rune_projection.hpp"
 #include "../predict/rune_predictor.hpp"
-
 #include "rm_utils/clock.hpp"
 #include "rm_utils/algorithm/math_tools.hpp"
 #include <opencv2/core.hpp>
@@ -12,11 +13,9 @@
 #include "rm_utils/algorithm/mahalanobis.hpp"
 
 #include <Eigen/Geometry>
-
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <cstdio>
 #include <limits>
 #include <numbers>
 #include <ranges>
@@ -489,13 +488,21 @@ struct RuneModel::Impl
         };
         if (std::ranges::any_of(checks, std::identity{}))
         {
-            std::fprintf(stderr,
-                         "rune diverged: state=[x=%.4f, y=%.4f, z=%.4f, w=%.4f, a=%.4f, psi=%.4f] | "
-                         "cov_diag=[%.4f, %.4f, %.4f, %.4f, %.4f, %.4f] | face_angle=%.4f | "
-                         "update_count=%zu",
-                         state[kX], state[kY], state[kZ], state[kW], state[kA], state[kPsi], cov(kX, kX), cov(kY, kY),
-                         cov(kZ, kZ), cov(kW, kW), cov(kA, kA), cov(kPsi, kPsi), face_angle,
-                         context.prediction.update_count);
+            // 限频跨越模型重建，避免不稳定观测导致每帧输出整组状态。
+            static thread_local std::chrono::steady_clock::time_point log_time{};
+            const auto now = std::chrono::steady_clock::now();
+            if (log_time == std::chrono::steady_clock::time_point{} || now - log_time >= std::chrono::seconds(5))
+            {
+                constexpr std::array reasons{"cov_x", "cov_y", "range_x", "range_y", "range_z", "speed",
+                                             "face_angle", "state_nan", "state_nonfinite"};
+                const auto failed = std::ranges::find(checks, true) - checks.begin();
+                MAS_LOG_WARN("Rune diverged: reason={}, state=[{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f}], "
+                             "cov_diag=[{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f}], face_angle={:.4f}, update_count={}",
+                             reasons[failed], state[kX], state[kY], state[kZ], state[kW], state[kA], state[kPsi],
+                             cov(kX, kX), cov(kY, kY), cov(kZ, kZ), cov(kW, kW), cov(kA, kA), cov(kPsi, kPsi),
+                             face_angle, context.prediction.update_count);
+                log_time = now;
+            }
             return true;
         }
         return false;

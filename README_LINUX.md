@@ -1,6 +1,6 @@
 # Linux编译与运行
 
-更新：2026-11-13。当前生成mas_vision、mas_vision_record、mas_vision_replay三个程序。只维护Linux运行，要求GCC>=13、CMake>=3.22，C++23，不需要ROS。已安装的依赖优先复用，不必每次重新安装或激活虚拟环境。
+更新：2026-11-15。当前生成mas_vision、mas_vision_record、mas_vision_replay三个程序。只维护Linux运行，要求GCC>=13、CMake>=3.22，C++23，不需要ROS。已安装的依赖优先复用，不必每次重新安装或激活虚拟环境。
 
 ## 1. 基础依赖
 
@@ -30,6 +30,8 @@ find /opt/MVS/lib/64 -maxdepth 1 -name 'libMvCameraControl.so*' -print
 
 ## 3. OpenVINO
 
+Intel 默认使用 OpenVINO；Orin NX 可用 `-DYOLO_RUNTIME=TENSORRT` 选择 TensorRT，构建时不再查找 OpenVINO。engine 生成、YAML 和上机检查步骤见 [YOLO 部署说明](auto_buff/buff_detect/yolo/README.md#orin-nx构建与运行)。
+
 只需准备一次共享环境，后续更新源码仍可复用：
 
 ```bash
@@ -47,11 +49,28 @@ cmake -S . -B build -DOpenVINO_DIR=/实际目录/openvino/cmake
 
 若缓存绑到已移走的旧环境，使用cmake -S . -B build -U OpenVINO_DIR重新发现。不要直接复制Python虚拟环境到不同路径。
 
+实机日志写入`output/live/<时间>/app_<时间>.log`，record/replay写入各自会话目录。模型、线程设置及最终统计同时输出到终端和文件，不受图像debug开关影响。Release编译时移除DEBUG/TRACE调用；Debug保留DEBUG。普通回放先打开会话日志再构建算法，`--validate`配对检查仍不创建分析输出目录。
+
 ## 4. 编译
 
 ```bash
 ./build_linux.sh
 ```
+
+自有代码统一使用C++23，并开启`-Wall -Wextra -Wpedantic`；第三方库不继承本工程的警告策略。警告默认不阻止编译，清理完警告后可用`./build_linux.sh -DVISION_WARNINGS_AS_ERRORS=ON`启用严格检查。第三方串口实现独立为`serial_driver`，不继承自有封装`serial`的C++23和警告设置。
+
+也可使用CMake 3.22兼容的预设；release仍输出到build，dev输出到同级build-dev：
+
+```bash
+cmake --preset release
+cmake --build --preset release -j8
+
+cmake --preset dev
+cmake --build --preset dev -j4
+ctest --preset dev
+```
+
+预设使用Unix Makefiles；若已有build使用其他生成器，继续用原构建命令，或在新的构建目录配置。个人SDK路径可以写入不入仓的CMakeUserPresets.json。三个构建入口共用cmake/ProjectOptions.cmake。
 
 也可以进入build使用熟悉的方式：
 
@@ -82,7 +101,6 @@ cmake --build build-replay -j8
 ./build/mas_vision
 ./build/mas_vision calibrate_camera
 ./build/mas_vision calibrate_handeye
-./build/mas_vision calibrate_latency
 ./build/mas_vision_record config/record.yaml
 ./build/mas_vision_replay config/replay.yaml
 ./build/mas_vision_replay config/media.yaml
@@ -91,11 +109,25 @@ python3 tools/check_pairs.py /path/to/session
 
 从build目录运行则使用./mas_vision等。程序默认配置按可执行文件所在的项目/build与项目/config布局定位，不依赖启动目录。文件/模型相对路径按所属YAML解析。
 
-三个calibrate命令是主程序的标定入口，不启动armor/buff。内参标定窗口按s保存圆点板样本，q或ESC结束并求解（至少10组）；手眼标定按s保存板面与曝光姿态，c清空，q或ESC求解（至少3组）。关闭窗口同ESC，参数写回config/hikcamera.yaml。延迟标定使用终端q结束，只有通过原有一致性门限才写入transfer_latency_ms。标定日志位于output/profiling。
+两个calibrate命令是主程序的标定入口，不启动armor/buff。内参标定窗口按s保存圆点板样本，q或ESC结束并求解（至少10组）；手眼标定按s保存板面与曝光姿态，c清空，q或ESC求解（至少3组）。关闭窗口同ESC，参数写回config/hikcamera.yaml。标定日志位于output/profiling。
 
 实机从固定auto_aim.yaml、auto_buff.yaml、hikcamera.yaml、serial_config.yaml装配。mode0/1为装甲板、2/3小符、4/5大符。两个算法线程长期存在，切模式不重载模型。相机只采一路海康；主程序不录视频，需要采集就运行独立record程序。
 
 main只负责资源装配和生命周期，配置字段由模块内部读取。runtime仍保留在auto_buff.yaml：router读取运行时长和帧有效期，并将同一有效期随帧交给armor/buff线程。max_runtime_s大于0时，即使没有相机帧也会正常通知退出。
+
+OpenCV在算法任务启动前由程序入口调用cv::setNumThreads(1)，实机的装甲板、传统检测和YOLO共用这一个进程级设置，构造检测器和切模式不再覆盖，也不从YAML读取。独立回放和测速在自己的入口同样固定为1。
+
+OpenVINO 的 YOLO 在 `auto_buff.detect.yolo` 中通过 `device: CPU | GPU` 选择推理设备，缺省为 CPU。CPU 单槽同步，`threads` 仅控制 CPU 推理线程数；GPU 双槽异步，需要 Intel 计算运行时。TensorRT 仅使用 GPU，加载在目标 Jetson 上提前生成的 `.engine`，不读取 CPU 线程数。两条路径都不自动回退设备。切模式不重建模型，旧 epoch 和过期结果丢弃。所有后端通过 `BuffDetector::create()` 构造，统一使用 `submit()` 和 `collect()`；满槽拒收，结果按提交顺序交付，离线逐帧等待对应结果。海康 SDK 要求提供 `MV_CC_Initialize/Finalize`，不再探测旧版兼容接口。
+
+构建并运行执行接口检查（没有GPU时只验证CPU部分）：
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON -DVISION_GPU_PROFILE_ONLY=ON
+cmake --build build --target mas_vision yolo_execution_test -j4
+./build/yolo_execution_test
+```
+
+CPU/GPU的实际帧率、帧龄和温度仍须在目标机对照；实机不设固定准入帧率；独立测速工具的`--fps`用于对照测试，不代表吞吐保证。
 
 Debug子类由各算法持有，在算法内部按YAML开关直接绘制；构建图元和编码的耗时计入处理线程。main不创建或传递ArmorDebug/BuffDebug。Display只准备后端配置，当前领域确有调试视图时才在主线程启动。装甲板火控直接返回公共SendPacket，13字节串口协议不变。
 

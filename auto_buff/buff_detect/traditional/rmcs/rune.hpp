@@ -11,7 +11,7 @@ class RuneDetector {
 public:
     struct Config {
         cv::Mat intrinsic, distortion; // 内参/畸变用于把物理尺寸及距离范围换算为像素过滤条件。
-        auto_buff::CampColor color = auto_buff::CampColor::BLUE; // 本次检测只处理一种颜色。
+        auto_buff::EnemyColor color = auto_buff::EnemyColor::BLUE; // 本次检测只处理一种颜色。
 
         double max_distance = 5.0; // 最远检测距离，米。
         double min_distance = 1.7; // 最近检测距离，米。

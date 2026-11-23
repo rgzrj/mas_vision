@@ -23,7 +23,7 @@ const char *const ARMOR_PRIORITIES[] = {"1", "2", "3", "4", "5", "sentry","outpo
 struct LightBar
 {
     EnemyColor               color                  = PURPLE;          // 灯条颜色
-    bool                     target_color_confirmed = false;           // 是否明确偏向当前敌方装甲板颜色
+    bool                     color_confirmed        = false;           // 是否明确偏向当前敌方装甲板颜色
     cv::Point2f              center, top, bottom, top2bottom;          // 灯条中心、上顶点、下顶点、上顶点到下顶点的距离
     std::vector<cv::Point2f> points;                                   // 灯条顶点
     double                   angle, angle_error, length, width, ratio; // 灯条角度、角度误差、长度、宽度、宽高比
@@ -67,7 +67,7 @@ struct Armor
     double init_ratio;        // 精修前宽高比
     double ratio;             // 精修后宽高比
     double side_ratio;        // 长短灯条比
-    double rectangular_error; // 垂直度误差 (0 表示垂直)
+    double rectangular_error; // 两灯条偏离板中心连线法向的最大角度
 
     std::string number;     // 识别出的类别名称
     float       confidence; // 置信度
@@ -122,10 +122,10 @@ struct Armor
 
         auto roll = std::atan2(left2right.y, left2right.x);
 
-        // 垂直度误差计算
+        // 计算两灯条偏离板中心连线法向的最大角度
         auto left_cos     = std::abs(std::cos(left.angle - roll));
         auto right_cos    = std::abs(std::cos(right.angle - roll));
-        rectangular_error = std::max(left_cos, right_cos);
+        rectangular_error = std::asin(std::clamp(std::max(left_cos, right_cos), 0.0, 1.0));
     }
 };
 

@@ -19,8 +19,7 @@ int main() {
                                  "[900.,0.,480.,0.,900.,270.,0.,0.,1.]\ndistortion:"
                                  " [0.,0.,0.,0.,0.]\n";
         auto hik = temporary / "hikcamera.yaml";
-        std::ofstream(hik) << "camera: {exposuretime: 4000, gain: 15, transfer_latency_ms: "
-                              "10.96}\n"
+        std::ofstream(hik) << "camera: {exposuretime: 4000, gain: 15}\n"
                               "calibration: {image_width: 960, image_height: 540, camera_matrix: "
                               "[900,0,480,0,900,270,0,0,1], distort_coeffs: [0,0,0,0,0]}\n"
                               "handeye_calibration: {R_camera2gimbal: [0,0,1,-1,0,0,0,-1,0], "
@@ -56,21 +55,25 @@ int main() {
         clipped_seed.boards[0].features_valid = false;
         require(!tracker.update(clipped_seed, .02, image).initialized,
                 "Clipped endpoints must not seed PnP");
+        auto unobserved_r = synthetic(.025, k);
+        unobserved_r.markers[0].observed = false;
+        require(!tracker.update(unobserved_r, .025, image).initialized,
+                "Unobserved R must not seed PnP");
         tracker.reset();
         auto neutral_r = synthetic(.03, k);
-        neutral_r.markers[0].color = auto_buff::CampColor::UNKNOWN;
+        neutral_r.markers[0].color = auto_buff::EnemyColor::UNKNOWN;
         const auto neutral_state = tracker.update(neutral_r, .03, image);
-        require(neutral_state.initialized && neutral_state.color == auto_buff::CampColor::RED,
+        require(neutral_state.initialized && neutral_state.color == auto_buff::EnemyColor::RED,
                 "Neutral R must initialize using the selected board color");
         auto neutral_update = synthetic(.04, k);
-        neutral_update.markers[0].color = auto_buff::CampColor::UNKNOWN;
+        neutral_update.markers[0].color = auto_buff::EnemyColor::UNKNOWN;
         require(tracker.update(neutral_update, .04, image).observed,
                 "Neutral R or selected board disappeared after initialization");
         tracker.reset();
         auto multiple_r = synthetic(.04, k);
         // A high glyph score must not hide the lower-scored geometrically correct
         // R.
-        multiple_r.markers.insert(multiple_r.markers.begin(), auto_buff::Marker{{80, 60}, auto_buff::CampColor::RED, 2, true});
+        multiple_r.markers.insert(multiple_r.markers.begin(), auto_buff::RuneIcon{{80, 60}, 2, auto_buff::EnemyColor::RED, true});
         const auto multi_state = tracker.update(multiple_r, .04, image);
         require(multi_state.initialized && cv::norm(cv::Vec3d(multi_state.state.x - 5, multi_state.state.y,
                                                               multi_state.state.z)) < .05,
@@ -81,7 +84,7 @@ int main() {
         double angle_before_occlusion = 0;
         for (int i = 0; i <= 225; ++i) {
             double time = i / 50.;
-            auto_buff::Detection input = synthetic(time, k);
+            auto_buff::BuffDetector::Detection input = synthetic(time, k);
             if (i >= 100 && i < 104)
                 input = {}; // Occlusion must predict, not inject held measurements.
             state = tracker.update(input, time, image);

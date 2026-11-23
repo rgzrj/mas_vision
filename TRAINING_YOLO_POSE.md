@@ -157,7 +157,7 @@ FP32 ONNX、FP16 XML+BIN、INT8 XML+BIN
 ```powershell
 .\build\buff_detect_test.exe --self-test yolo
 .\build\buff_pose_test.exe
-.\build\buff_detect_test.exe tests/auto_buff/yolo_pose.yaml
+.\build\buff_preview.exe tests/auto_buff/yolo_pose.yaml
 ```
 
 修改yolo_pose.yaml的model可检查新权重；自检使用随工程保留的深大基准权重和参考帧。加载成功只是接口检查，通过数据精度、连续视频和目标机速度验证后才算新模型验收完成。

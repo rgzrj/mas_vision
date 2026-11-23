@@ -47,19 +47,8 @@ hardware::HikCamera::HikCamera(const std::string &config_path)
             MAS_LOG_ERROR("gain not found, using default: {}", gain_);
         }
 
-        // 读取传输延迟
-        if(camera_config["transfer_latency_ms"])
-        {
-            transfer_latency_ms_ = camera_config["transfer_latency_ms"].as<float>();
-        }
-        else
-        {
-            MAS_LOG_ERROR("transfer_latency_ms not found, using default: {}", transfer_latency_ms_);
-        }
-
-        if (!std::isfinite(exposure_time_) || exposure_time_ <= 0 || !std::isfinite(gain_) || gain_ < 0 ||
-            !std::isfinite(transfer_latency_ms_) || transfer_latency_ms_ < 0)
-            throw std::runtime_error("Invalid Hikcamera exposure, gain or transfer latency");
+        if (!std::isfinite(exposure_time_) || exposure_time_ <= 0 || !std::isfinite(gain_) || gain_ < 0)
+            throw std::runtime_error("Invalid Hikcamera exposure or gain");
         MAS_LOG_INFO("Config loaded successfully from: {}", config_path.c_str());
         return;
     }
@@ -85,13 +74,11 @@ hardware::HikCamera::~HikCamera()
     // 仅初始化后才需要 finalize
     if (sdk_initialized_)
     {
-#if BUFF_MVS_HAS_LIFECYCLE
         const int nRet = MV_CC_Finalize();
         if (nRet != MV_OK)
         {
             MAS_LOG_ERROR("Finalize SDK fail! nRet 0x{0:x}", nRet);
         }
-#endif
         sdk_initialized_ = false;
     }
 }
@@ -125,14 +112,12 @@ bool hardware::HikCamera::openCameraImpl(bool start_threads)
     // Initialize SDK(即使已经连接且句柄不为空，也可能是 SDK 尚未初始化)
     if (!sdk_initialized_)
     {
-#if BUFF_MVS_HAS_LIFECYCLE
         nRet = MV_CC_Initialize();
         if (nRet != MV_OK)
         {
             MAS_LOG_ERROR("Initialize SDK fail! nRet 0x{0:x}", nRet);
             return false;
         }
-#endif
         sdk_initialized_ = true;
     }
 

@@ -12,10 +12,10 @@ class ArmorTrack;
 /**
  * @brief 跟踪状态与预测模型的调试绘制
  */
-class TrackDebug : public ArmorDebug
+class TrackDebug : public ArmorDebugBase
 {
 public:
-    explicit TrackDebug(bool enabled = false) : ArmorDebug(enabled, "HikCamera_track") {}
+    explicit TrackDebug(bool enabled = false) : ArmorDebugBase(enabled, "HikCamera_track") {}
 
     // 绘制跟踪状态、EKF 参数和模型投影；关闭 debug 时立即返回。
     void draw(const cv::Mat &bgr_img, const std::vector<Armor> &armors, const ArmorTrack &tracker);

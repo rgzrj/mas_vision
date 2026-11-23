@@ -32,6 +32,7 @@ auto_aim:
     yaw_offset: 0.5                # 单位：度
     pitch_offset: 1.0              # 单位：度
     bullet_speed: 16.0             # 子弹初速度，单位：m/s
+    max_pitch: 40.0                # 最大仰角，单位：degree
     gravity: 9.81                  # 重力加速度，单位：m/s^2
     resistance: 0.014              # 二次空气阻力系数，单位：1/m
     fire_delay_time: 0.080         # 统一发弹延迟，单位：s

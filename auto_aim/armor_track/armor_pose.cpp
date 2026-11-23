@@ -1,9 +1,9 @@
 #include "armor_pose.hpp"
 
+#include <array>
 #include <cmath>
-#include <exception>
-#include <fstream>
 #include <limits>
+#include <stdexcept>
 
 #include "armor_types.hpp"
 #include "mas_log.hpp"
@@ -14,39 +14,47 @@ namespace auto_aim
 {
 ArmorPose::ArmorPose(const std::string &config_path) : R_gimbal2world_(Eigen::Matrix3d::Identity())
 {
-    // yaml 读取参数
-    try
+    // yaml 配置文件读取
+    const auto config      = YAML::LoadFile(config_path);
+    const auto handeye     = config["handeye_calibration"];
+    const auto calibration = config["calibration"];
+
+    const auto R_gimbal2imubody_data = handeye["R_gimbal2imubody"].as<std::array<double, 9>>();
+    const auto R_camera2gimbal_data  = handeye["R_camera2gimbal"].as<std::array<double, 9>>();
+    const auto t_camera2gimbal_data  = handeye["t_camera2gimbal"].as<std::array<double, 3>>();
+    const auto camera_matrix_data    = calibration["camera_matrix"].as<std::array<double, 9>>();
+    const auto distort_coeffs_data   = calibration["distort_coeffs"].as<std::array<double, 5>>();
+
+    R_gimbal2imubody_ = Eigen::Matrix<double, 3, 3, Eigen::RowMajor>(R_gimbal2imubody_data.data());
+    R_camera2gimbal_  = Eigen::Matrix<double, 3, 3, Eigen::RowMajor>(R_camera2gimbal_data.data());
+    t_camera2gimbal_  = Eigen::Vector3d(t_camera2gimbal_data.data());
+    const Eigen::Matrix<double, 3, 3, Eigen::RowMajor> camera_matrix(camera_matrix_data.data());
+    const Eigen::Matrix<double, 1, 5> distort_coeffs(distort_coeffs_data.data());
+
+    // 检查旋转矩阵和相机内参的有效性
+    const auto require_rotation = [&](const Eigen::Matrix3d &rotation, const char *name)
     {
-        // 检查文件是否存在
-        std::ifstream file(config_path);
-        if (!file.good())
-        {
-            MAS_LOG_ERROR("Config file not found: {}, using default values", config_path.c_str());
-            return;
-        }
+        if (!rotation.allFinite() || (rotation.transpose() * rotation - Eigen::Matrix3d::Identity()).norm() > 1e-3 ||
+            std::abs(rotation.determinant() - 1) > 1e-3)
+            throw std::runtime_error(std::string(name) + " must be a proper rotation matrix: " + config_path);
+    };
 
-        YAML::Node config = YAML::LoadFile(config_path);
-        // 读取参数
-        auto R_gimbal2imubody_data = config["handeye_calibration"]["R_gimbal2imubody"].as<std::vector<double>>();
-        auto R_camera2gimbal_data  = config["handeye_calibration"]["R_camera2gimbal"].as<std::vector<double>>();
-        auto t_camera2gimbal_data  = config["handeye_calibration"]["t_camera2gimbal"].as<std::vector<double>>();
-        R_gimbal2imubody_          = Eigen::Matrix<double, 3, 3, Eigen::RowMajor>(R_gimbal2imubody_data.data());
-        R_camera2gimbal_           = Eigen::Matrix<double, 3, 3, Eigen::RowMajor>(R_camera2gimbal_data.data());
-        t_camera2gimbal_           = Eigen::Matrix<double, 3, 1>(t_camera2gimbal_data.data());
+    require_rotation(R_gimbal2imubody_, "R_gimbal2imubody");
+    require_rotation(R_camera2gimbal_, "R_camera2gimbal");
 
-        auto                                         camera_matrix_data  = config["calibration"]["camera_matrix"].as<std::vector<double>>();
-        auto                                         distort_coeffs_data = config["calibration"]["distort_coeffs"].as<std::vector<double>>();
-        Eigen::Matrix<double, 3, 3, Eigen::RowMajor> camera_matrix(camera_matrix_data.data());
-        Eigen::Matrix<double, 1, 5>                  distort_coeffs(distort_coeffs_data.data());
-        cv::eigen2cv(camera_matrix, camera_matrix_);
-        cv::eigen2cv(distort_coeffs, distort_coeffs_);
+    if (!t_camera2gimbal_.allFinite())
+        throw std::runtime_error("Invalid t_camera2gimbal: " + config_path);
+        
+    if (!camera_matrix.allFinite() || !distort_coeffs.allFinite() ||
+        camera_matrix(0, 0) <= 0 || camera_matrix(1, 1) <= 0 ||
+        std::abs(camera_matrix(2, 2) - 1) > 1e-8 ||
+        std::abs(camera_matrix(0, 1)) + std::abs(camera_matrix(1, 0)) +
+            std::abs(camera_matrix(2, 0)) + std::abs(camera_matrix(2, 1)) > 1e-8)
+        throw std::runtime_error("Invalid armor pose camera calibration: " + config_path);
 
-        MAS_LOG_INFO("armor_pose yaml loaded successfully");
-    }
-    catch (const std::exception &e)
-    {
-        MAS_LOG_WARN("Failed to load config, using defaults: {}", e.what());
-    }
+    cv::eigen2cv(camera_matrix, camera_matrix_);
+    cv::eigen2cv(distort_coeffs, distort_coeffs_);
+    MAS_LOG_INFO("armor_pose yaml loaded successfully");
 }
 
 ArmorPose::~ArmorPose() = default;

@@ -23,12 +23,15 @@ class RuneShooter
 public:
     struct Config
     {
-        double bullet_speed        = 22.5; // m/s
-        double shoot_delay         = 0.04; // s，包含发令到弹丸出膛延迟
-        double offset_yaw          = 0.0;  // degree
-        double offset_pitch        = 0.0;  // degree
-        double rune_idle_duration  = 0.4;  // s
-        double rune_shoot_duration = 0.2;  // s
+        double bullet_speed        = 22.5;  // m/s
+        double gravity             = 9.81;  // 重力加速度，单位：m/s^2
+        double resistance          = 0.014; // 二次空气阻力系数，单位：1/m
+        double fire_delay_time     = 0.080; // 统一发弹延迟，单位：s
+        double offset_yaw          = 0.0;   // degree
+        double offset_pitch        = 0.0;   // degree
+        double max_pitch           = 80.0;  //degree
+        double rune_idle_duration  = 0.4;   // s
+        double rune_shoot_duration = 0.2;   // s
     };
 
     struct State
@@ -74,6 +77,7 @@ public:
      * @param track 本帧跟踪结果；未初始化时重置发弹周期。
      */
     auto shoot(const auto_buff::TrackResult &track, const cv::Mat &image = {}) -> std::optional<Aimed>;
+
     void disable_debug() noexcept;
     /// 清空 idle/shoot 周期；模型丢失、换模式或重新初始化时调用。
     auto reset() noexcept -> void;

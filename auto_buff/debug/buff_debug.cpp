@@ -1,5 +1,7 @@
 #include "buff_debug.hpp"
 #include "buff_blueprints.hpp"
+#include "visualize/shoot_debug.hpp"
+#include "visualize/track_debug.hpp"
 
 #include <array>
 #include <chrono>
@@ -10,7 +12,7 @@ namespace auto_buff
 unsigned BuffDebug::enabled_views(const YAML::Node &config)
 {
     const auto buff   = config["auto_buff"];
-    const bool detect = buff["detect"]["debug"].as<bool>(false);
+    const bool detect = buff["detect"]["common"]["debug"].as<bool>(false);
     const bool track  = buff["track"]["debug"].as<bool>(false);
     const bool shoot  = buff["shoot"]["debug"].as<bool>(false);
     // 位顺序与现有 Rerun 布局一致：detect、track、shoot。
@@ -42,9 +44,41 @@ void BuffDebug::configure_layout(unsigned mask, bool realtime)
         display.layout(views, kBuffBlueprints[mask]);
 }
 
-BuffDebug::BuffDebug(bool enabled, const std::string &window_name) : enabled_(enabled), window_name_(window_name) {}
+BuffDebug::BuffDebug(const std::filesystem::path &config) : views_(configure_layout(config)) {}
 
-double BuffDebug::update_fps()
+std::unique_lock<std::mutex> BuffDebug::begin_frame(std::chrono::steady_clock::time_point timestamp) const
+{
+    if (!views_)
+        return {};
+
+    auto &display = rm_utils::Display::getInstance();
+    std::unique_lock lock(display.frame_mutex());
+    display.set_time(std::chrono::duration<double>(timestamp.time_since_epoch()).count());
+    return lock;
+}
+
+void BuffDebug::pose_unavailable(const cv::Mat &image) const
+{
+    unavailable(image, views_, "Pose unavailable");
+
+    if (views_ & 2)
+        TrackDebug::clear();
+    if (views_ & 4)
+        ShootDebug::clear();
+}
+
+void BuffDebug::end_frame() const
+{
+    if (views_)
+        rm_utils::Display::getInstance().end_frame();
+}
+
+BuffDebugBase::BuffDebugBase(bool enabled, const std::string &window_name)
+    : enabled_(enabled), window_name_(window_name)
+{
+}
+
+double BuffDebugBase::update_fps()
 {
     const auto now = std::chrono::steady_clock::now();
     if (fps_start_ == std::chrono::steady_clock::time_point{})
@@ -62,9 +96,9 @@ double BuffDebug::update_fps()
     return fps_;
 }
 
-void BuffDebug::show(const cv::Mat &image, std::vector<rm_utils::DisplayText> &texts,
-                     const std::vector<rm_utils::DisplayPoint> &points,
-                     const std::vector<rm_utils::DisplayLine> &lines) const
+void BuffDebugBase::show(const cv::Mat &image, std::vector<rm_utils::DisplayText> &texts,
+                         const std::vector<rm_utils::DisplayPoint> &points,
+                         const std::vector<rm_utils::DisplayLine> &lines) const
 {
     // 各模块只把状态文字标为 image_overlay，点旁标签不能扩大左上角背景范围。
     rm_utils::Display::getInstance().display_add(window_name_, image, texts, points, lines);

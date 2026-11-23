@@ -1,4 +1,5 @@
 #include "paired_recorder.hpp"
+#include "frame_metadata.hpp"
 #include <yaml-cpp/yaml.h>
 #include <cmath>
 #include <stdexcept>

@@ -1,10 +1,10 @@
-#ifndef _BUFF_DEBUG_H_
-#define _BUFF_DEBUG_H_
+#pragma once
 
 #include "rm_utils/display/display.hpp"
 
 #include <chrono>
 #include <filesystem>
+#include <mutex>
 #include <opencv2/core/mat.hpp>
 #include <string>
 #include <vector>
@@ -16,21 +16,16 @@ class Node;
 
 namespace auto_buff
 {
-/**
- * @brief 打符调试基类
- * @details 各算法持有对应的调试子类，共用开关、窗口名、FPS 统计和图元提交。
- */
+// 管理打符调试窗口布局和实机单帧提交。
 class BuffDebug
 {
 public:
-    bool enabled() const noexcept
-    {
-        return enabled_;
-    }
-    void set_enabled(bool enabled) noexcept
-    {
-        enabled_ = enabled;
-    }
+    explicit BuffDebug(const std::filesystem::path &config);
+
+    // 锁随调用方的帧作用域释放，保证同一帧的绘制使用同一个时间戳。
+    std::unique_lock<std::mutex> begin_frame(std::chrono::steady_clock::time_point timestamp) const;
+    void pose_unavailable(const cv::Mat &image) const;
+    void end_frame() const;
 
     /**
      * @brief 读取各模块的图像调试开关
@@ -64,11 +59,28 @@ public:
     static void unavailable(const cv::Mat &image, unsigned views, const std::string &status,
                             bool include_detect = false);
 
+private:
+    unsigned views_;
+};
+
+// 各绘制子类共用窗口开关、FPS 统计和图元提交。
+class BuffDebugBase
+{
+public:
+    bool enabled() const noexcept
+    {
+        return enabled_;
+    }
+    void set_enabled(bool enabled) noexcept
+    {
+        enabled_ = enabled;
+    }
+
 protected:
     /**
      * @brief 初始化当前模块的调试开关与窗口名
      */
-    BuffDebug(bool enabled, const std::string &window_name);
+    BuffDebugBase(bool enabled, const std::string &window_name);
 
     /**
      * @brief 更新本实例的处理帧率；首个统计周期不足一秒时返回 -1
@@ -77,7 +89,7 @@ protected:
 
     /**
      * @brief 将子类生成的文字、点和线提交到本实例的 Display 窗口
-     * @note 调试类不复制图像；Display在采样后持有只读图像引用直到显示完成
+     * @note 本方法只提交图元，不修改文字；Display持有只读图像引用直到显示完成
      */
     void show(const cv::Mat &image, std::vector<rm_utils::DisplayText> &texts,
               const std::vector<rm_utils::DisplayPoint> &points, const std::vector<rm_utils::DisplayLine> &lines) const;
@@ -93,5 +105,3 @@ private:
 };
 
 } // namespace auto_buff
-
-#endif // _BUFF_DEBUG_H_

@@ -1,29 +1,20 @@
 #include "traditional.hpp"
 #include "auto_buff/buff_detect/traditional/process.hpp"
 
+#include <yaml-cpp/yaml.h>
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <utility>
 
 namespace auto_buff
 {
 
-TraditionalDetector::TraditionalDetector(const std::filesystem::path &config_path,
-                                         const std::filesystem::path &camera_config)
-    : TraditionalDetector(camera_config,
-                          YAML::LoadFile(config_path.string())["auto_buff"]["detect"]["color"].as<std::string>("red"),
-                          YAML::LoadFile(config_path.string())["auto_buff"]["detect"])
+TraditionalDetector::TraditionalDetector(const YAML::Node &root, const YAML::Node &yaml) : BuffDetector(root)
 {
-}
+    const auto settings = root["auto_buff"]["detect"]["traditional"];
+    save_masks_         = settings["save_masks"].as<bool>(false);
 
-TraditionalDetector::TraditionalDetector(const std::filesystem::path &camera_config, std::string color,
-                                         const YAML::Node &settings)
-    : save_masks_(settings["save_masks"].as<bool>(false))
-{
-    set_color(color);
-    detect_debug_.set_enabled(settings["debug"].as<bool>(false));
-    // 与 mas_vision 一样，由使用参数的模块直接读取自己的标定。
-    auto yaml            = YAML::LoadFile(camera_config.string());
     auto calibration     = yaml["calibration"] ? yaml["calibration"] : yaml;
     const auto intrinsic = calibration["camera_matrix"].as<std::array<double, 9>>();
     const auto distortion =
@@ -52,24 +43,46 @@ TraditionalDetector::TraditionalDetector(const std::filesystem::path &camera_con
         throw std::runtime_error("Invalid RMCS detector distance, perspective or score thresholds");
 }
 
-Detection TraditionalDetector::detect_impl(const cv::Mat &image, double)
+bool TraditionalDetector::submit(const cv::Mat &image, double seconds, RuneMode mode)
+{
+    if (pending_)
+        return false;
+
+    auto result    = detect_impl(image);
+    result.image   = image;
+    result.seconds = seconds;
+    result.mode    = mode;
+    result.color   = color();
+    pending_       = std::move(result);
+    return true;
+}
+
+std::optional<BuffDetector::Detection> TraditionalDetector::collect_impl()
+{
+    return std::exchange(pending_, std::nullopt);
+}
+
+BuffDetector::Detection TraditionalDetector::detect_impl(const cv::Mat &image)
 {
     if (image.empty() || image.type() != CV_8UC3)
         throw std::runtime_error("RMCS traditional detector needs a BGR image");
     if (calibration_size_ != cv::Size{} && image.size() != calibration_size_)
         throw std::runtime_error("Traditional input resolution does not match its camera calibration");
-    Detection result;
-    const auto color       = color_;
-    detector_.config.color = color;
-    const auto elements    = detector_.detect(image);
+    BuffDetector::Detection result;
+    const auto target_color = color();
+    detector_.config.color  = target_color;
+    auto elements           = detector_.detect(image);
+
     // R 评分仅供候选排序，不提前淘汰几何上可能正确的低分 R。
-    for (const auto &icon : elements.icons)
-        result.markers.push_back(Marker{{icon.center.x, icon.center.y}, color_, icon.score, true});
+    result.markers = std::move(elements.icons);
+    for (auto &icon : result.markers)
+        icon.color = target_color;
+
     for (const auto &target : elements.bullseyes)
     {
         Board board;
         board.center         = {target.center.x, target.center.y};
-        board.color          = color_;
+        board.color          = target_color;
         board.appearance     = target.active ? Appearance::single_ring : Appearance::full_mark;
         board.source         = "rmcs_traditional";
         board.pvd            = target.score;
@@ -87,7 +100,7 @@ Detection TraditionalDetector::detect_impl(const cv::Mat &image, double)
         result.boards.push_back(board);
     }
     if (save_masks_)
-        auto_buff::extract_channel(image, color, result.mask);
+        auto_buff::extract_channel(image, target_color, result.mask);
     return result;
 }
 

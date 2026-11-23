@@ -1,7 +1,7 @@
 #pragma once
 
 #include "rune_pose.hpp"
-#include "auto_buff/buff_detect/detection.hpp"
+#include "auto_buff/buff_detect/buff_detector.hpp"
 
 namespace auto_buff {
 

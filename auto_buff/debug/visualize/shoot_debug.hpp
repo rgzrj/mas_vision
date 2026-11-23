@@ -8,10 +8,10 @@ namespace auto_buff
 struct TrackResult;
 
 // 火控现有 Impl 持有本对象，避免公开头文件相互包含。
-class ShootDebug : public BuffDebug
+class ShootDebug : public BuffDebugBase
 {
 public:
-    explicit ShootDebug(bool enabled = false) : BuffDebug(enabled, "shoot") {}
+    explicit ShootDebug(bool enabled = false) : BuffDebugBase(enabled, "shoot") {}
     void draw(const TrackResult &track, const std::optional<RuneShooter::Aimed> &aimed, const cv::Mat &image);
     static void clear();
 };

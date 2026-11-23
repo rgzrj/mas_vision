@@ -1,4 +1,5 @@
 #include <atomic>
+#include "mas_log.hpp"
 #include <csignal>
 #include "record.hpp"
 #include "rm_utils/io/runtime_path.hpp"
@@ -27,7 +28,7 @@ int main(int argc, char **argv)
     catch (const std::exception &e)
     {
         g_shutdown = true;
-        std::cerr << "Error: " << e.what() << '\n';
+        MAS_LOG_ERROR("{}", e.what());
         return 1;
     }
 }

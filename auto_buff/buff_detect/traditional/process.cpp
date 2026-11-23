@@ -4,7 +4,7 @@
 
 namespace auto_buff {
 
-auto extract_channel(const cv::Mat& src, CampColor camp, cv::Mat& dst) -> void {
+auto extract_channel(const cv::Mat& src, EnemyColor camp, cv::Mat& dst) -> void {
     constexpr auto kRedDiffThreshold  = 40;
     constexpr auto kBlueDiffThreshold = 40;
 
@@ -23,7 +23,7 @@ auto extract_channel(const cv::Mat& src, CampColor camp, cv::Mat& dst) -> void {
     auto mask          = cv::Mat { };
     auto min_mask      = cv::Mat { };
 
-    if (camp == CampColor::RED) {
+    if (camp == EnemyColor::RED) {
         // 1. 颜色差值：R - B
         cv::subtract(channels[2], channels[0], diff_color, cv::noArray(), CV_16S);
         diff_color.convertTo(diff_color_u8, CV_8U);
@@ -40,7 +40,7 @@ auto extract_channel(const cv::Mat& src, CampColor camp, cv::Mat& dst) -> void {
         cv::threshold(channels[2], min_mask, kMinChannelThreshold, 255, cv::THRESH_BINARY);
         cv::bitwise_and(mask, min_mask, dst);
 
-    } else if (camp == CampColor::BLUE) {
+    } else if (camp == EnemyColor::BLUE) {
         // 1. 颜色差值：B - R
         cv::subtract(channels[0], channels[2], diff_color, cv::noArray(), CV_16S);
         diff_color.convertTo(diff_color_u8, CV_8U);

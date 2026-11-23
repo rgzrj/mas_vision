@@ -2,6 +2,7 @@
 #include "auto_aim/armor_track/armor_track.hpp"
 
 #include <limits>
+#include <spdlog/fmt/fmt.h>
 
 namespace auto_aim
 {
@@ -22,92 +23,30 @@ void TrackDebug::draw(const cv::Mat &bgr_img, const std::vector<Armor> &armors, 
     std::vector<rm_utils::DisplayLine> lines;
     std::vector<rm_utils::DisplayText> texts;
 
-    // 左上角状态：帧率、观测数量、跟踪状态和目标模型参数。
-    rm_utils::DisplayText fps_text;
-    fps_text.content = "FPS: " + std::to_string(static_cast<int>(fps)) + " Armors: " + std::to_string(armors.size()) +
-                       " State: " + state;
-    fps_text.x         = 20;
-    fps_text.y         = 20;
-    fps_text.size      = 24;
-    fps_text.color     = {255, 255, 0, 255};
-    fps_text.thickness = 2;
-    texts.push_back(fps_text);
-
-    // 显示跟踪目标参数
-    if (target.has_value())
+    // 左上角状态与模型参数；小数位数明确，不按字符串长度截断数值。
+    texts.push_back({fmt::format("FPS: {} Armors: {} State: {}", int(fps), armors.size(), state),
+                     20, 20, 24, {255, 255, 0, 255}, 2});
+    if (target)
     {
-        // 目标基本信息
-        rm_utils::DisplayText target_text;
-        target_text.content = "Target: " + target->name + " ID: " + std::to_string(target->last_id) +
-                              " Updates: " + std::to_string(target->update_count);
-        target_text.x         = 20;
-        target_text.y         = 50;
-        target_text.size      = 20;
-        target_text.color     = {0, 255, 0, 255};
-        target_text.thickness = 1;
-        texts.push_back(target_text);
+        texts.push_back({fmt::format("Target: {} ID: {} Updates: {}", target->name, target->last_id,
+                                    target->update_count),
+                         20, 50, 20, {0, 255, 0, 255}});
+        texts.push_back({fmt::format("type: SMALL jumped: {} switch: {} armor_num: {}", int(target->jumped),
+                                    int(target->is_switch), target->armor_num),
+                         20, 75, 18, {255, 200, 0, 255}});
 
-        // 目标类型和状态
-        rm_utils::DisplayText target_info;
-        target_info.content = "type: " + std::string("SMALL") + " jumped: " + std::to_string(target->jumped) +
-                              " switch: " + std::to_string(target->is_switch) +
-                              " armor_num: " + std::to_string(target->armor_num);
-        target_info.x         = 20;
-        target_info.y         = 75;
-        target_info.size      = 18;
-        target_info.color     = {255, 200, 0, 255};
-        target_info.thickness = 1;
-        texts.push_back(target_info);
-
-        // EKF 状态顺序：[x, vx, y, vy, z, vz, yaw, omega, r, l, h]。
-        if (target->ekf().x.size() >= 11)
+        // EKF 状态顺序：[x, vx, y, vy, z, vz, yaw, omega, radius_02, radius_13, h]。
+        const auto &x = target->ekf().x;
+        if (x.size() >= 11)
         {
-            // 位置
-            rm_utils::DisplayText position_text;
-            position_text.content = "x: " + std::to_string(target->ekf().x[0]).substr(0, 4) +
-                                    " y: " + std::to_string(target->ekf().x[2]).substr(0, 4) +
-                                    " z: " + std::to_string(target->ekf().x[4]).substr(0, 4);
-            position_text.x         = 20;
-            position_text.y         = 100;
-            position_text.size      = 18;
-            position_text.color     = {0, 255, 255, 255};
-            position_text.thickness = 1;
-            texts.push_back(position_text);
-
-            // 速度
-            rm_utils::DisplayText velocity_text;
-            velocity_text.content = "vx: " + std::to_string(target->ekf().x[1]).substr(0, 4) +
-                                    " vy: " + std::to_string(target->ekf().x[3]).substr(0, 4) +
-                                    " vz: " + std::to_string(target->ekf().x[5]).substr(0, 4);
-            velocity_text.x         = 20;
-            velocity_text.y         = 125;
-            velocity_text.size      = 18;
-            velocity_text.color     = {0, 255, 255, 255};
-            velocity_text.thickness = 1;
-            texts.push_back(velocity_text);
-
-            // 角度和角速度
-            rm_utils::DisplayText rotation_text;
-            rotation_text.content = "yaw: " + std::to_string(target->ekf().x[6]).substr(0, 4) +
-                                    " w: " + std::to_string(target->ekf().x[7]).substr(0, 4);
-            rotation_text.x         = 20;
-            rotation_text.y         = 150;
-            rotation_text.size      = 18;
-            rotation_text.color     = {0, 255, 255, 255};
-            rotation_text.thickness = 1;
-            texts.push_back(rotation_text);
-
-            // 半径参数
-            rm_utils::DisplayText geometry_text;
-            geometry_text.content = "r: " + std::to_string(target->ekf().x[8]).substr(0, 4) +
-                                    " l: " + std::to_string(target->ekf().x[9]).substr(0, 4) +
-                                    " h: " + std::to_string(target->ekf().x[10]).substr(0, 4);
-            geometry_text.x         = 20;
-            geometry_text.y         = 175;
-            geometry_text.size      = 18;
-            geometry_text.color     = {0, 255, 255, 255};
-            geometry_text.thickness = 1;
-            texts.push_back(geometry_text);
+            texts.push_back({fmt::format("x: {:.3f} y: {:.3f} z: {:.3f}", x[0], x[2], x[4]),
+                             20, 100, 18, {0, 255, 255, 255}});
+            texts.push_back({fmt::format("vx: {:.3f} vy: {:.3f} vz: {:.3f}", x[1], x[3], x[5]),
+                             20, 125, 18, {0, 255, 255, 255}});
+            texts.push_back({fmt::format("yaw: {:.3f} w: {:.3f}", x[6], x[7]),
+                             20, 150, 18, {0, 255, 255, 255}});
+            texts.push_back({fmt::format("r02: {:.3f} r13: {:.3f} h: {:.3f} m", x[8], x[9], x[10]),
+                             20, 175, 18, {0, 255, 255, 255}});
         }
     }
 
@@ -116,7 +55,7 @@ void TrackDebug::draw(const cv::Mat &bgr_img, const std::vector<Armor> &armors, 
     {
         // 显示装甲板编号和置信度
         rm_utils::DisplayText armor_info_text;
-        armor_info_text.content = "[" + armor.number + "]: [" + std::to_string(armor.confidence).substr(0, 5) + "]";
+        armor_info_text.content = fmt::format("[{}]: [{:.3f}]", armor.number, armor.confidence);
         armor_info_text.x       = static_cast<int>(armor.center.x) -
                             static_cast<int>(armor_info_text.size * armor_info_text.content.size() / 2);
         armor_info_text.y         = static_cast<int>(armor.center.y);

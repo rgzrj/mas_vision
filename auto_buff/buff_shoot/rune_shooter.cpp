@@ -19,10 +19,14 @@ RuneShooter::Config load_shoot_config(const std::filesystem::path &path)
 {
     const auto settings = YAML::LoadFile(path.string())["auto_buff"]["shoot"];
     RuneShooter::Config config;
+    
     config.bullet_speed        = settings["bullet_speed"].as<double>(config.bullet_speed);
-    config.shoot_delay         = settings["shoot_delay"].as<double>(config.shoot_delay);
+    config.fire_delay_time     = settings["fire_delay_time"].as<double>(config.fire_delay_time);
+    config.gravity             = settings["gravity"].as<double>(config.gravity);
+    config.resistance          = settings["resistance"].as<double>(config.resistance);
     config.offset_yaw          = settings["offset_yaw"].as<double>(config.offset_yaw);
     config.offset_pitch        = settings["offset_pitch"].as<double>(config.offset_pitch);
+    config.max_pitch           = settings["max_pitch"].as<double>(config.max_pitch);
     config.rune_idle_duration  = settings["rune_idle_duration"].as<double>(config.rune_idle_duration);
     config.rune_shoot_duration = settings["rune_shoot_duration"].as<double>(config.rune_shoot_duration);
     return config;
@@ -43,8 +47,11 @@ struct RuneShooter::Impl
     {
         if (!std::isfinite(config.bullet_speed) || config.bullet_speed <= 0.0)
             throw std::runtime_error("shoot.bullet_speed must be finite and positive");
-        if (!std::isfinite(config.shoot_delay) || config.shoot_delay < 0.0)
-            throw std::runtime_error("shoot.shoot_delay must be finite and nonnegative");
+        if (!std::isfinite(config.fire_delay_time) || config.fire_delay_time < 0.0)
+            throw std::runtime_error("shoot.fire_delay_time must be finite and nonnegative");
+        if (!std::isfinite(config.gravity) || config.gravity <= 0.0 ||
+            !std::isfinite(config.resistance) || config.resistance < 0.0)    
+            throw std::runtime_error("shoot.gravity must be finite and positive");
         if (!std::isfinite(config.offset_yaw) || !std::isfinite(config.offset_pitch))
             throw std::runtime_error("shoot angle offsets must be finite");
         if (!std::isfinite(config.rune_idle_duration) || config.rune_idle_duration <= 0.0 ||
@@ -53,6 +60,7 @@ struct RuneShooter::Impl
 
         config.offset_yaw   = deg2rad(config.offset_yaw);
         config.offset_pitch = deg2rad(config.offset_pitch);
+        config.max_pitch    = deg2rad(config.max_pitch);
     }
 
     // 以解算时间推进 idle/shoot 两阶段；暂停、丢失或换模式由外层 reset 清周期。
@@ -90,7 +98,7 @@ struct RuneShooter::Impl
         const auto initial_fly_time = distance / config.bullet_speed;
         // track_timestamp 是曝光时刻，state.timestamp 是解算时刻；两者之差是处理延迟。
         const auto stale_time  = std::chrono::duration<double>(state.timestamp - track_timestamp).count();
-        const auto fixed_delay = config.shoot_delay + stale_time;
+        const auto fixed_delay = config.fire_delay_time + stale_time;
 
         // 原版先以中心距离估算飞行时间，用该时刻的首个待击符板决定攻击/空闲状态。
         auto selected = false;
@@ -134,7 +142,8 @@ struct RuneShooter::Impl
             }
 
             const auto trajectory =
-                rm_utils::Trajectory(config.bullet_speed, attack.head<2>().norm(), attack.z(), 9.81, .003, 80.0 / 57.3);
+                rm_utils::Trajectory(config.bullet_speed, attack.head<2>().norm(), attack.z(), 
+                                        config.gravity, config.resistance, config.max_pitch);
             if (trajectory.unsolvable)
                 return std::nullopt;
 

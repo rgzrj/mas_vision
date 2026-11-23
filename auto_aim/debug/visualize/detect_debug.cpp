@@ -109,27 +109,15 @@ void DetectDebug::draw(const cv::Mat &bgr_img, const std::vector<Armor> &armors,
         points.push_back(center_point);
 
         // 依次显示长宽比、侧边比、矩形角误差（度）、置信度、类别和尺寸。
-        rm_utils::DisplayText armor_info;
-        armor_info.content   = fmt::format("{:.2f} {:.2f} {:.1f} {:.2f} {} {}", armor.ratio, armor.side_ratio,
-                                           armor.rectangular_error * 57.3, armor.confidence, armor.number, "SMALL");
-        armor_info.x         = static_cast<int>(armor.center.x) + 25;
-        armor_info.y         = static_cast<int>(armor.center.y);
-        armor_info.size      = 24;
-        armor_info.color     = {255, 255, 0, 255};
-        armor_info.thickness = 1;
-        texts.push_back(armor_info);
+        texts.push_back({fmt::format("{:.2f} {:.2f} {:.1f} {:.2f} {} {}", armor.ratio, armor.side_ratio,
+                                    armor.rectangular_error * 180.0 / CV_PI, armor.confidence, armor.number, "SMALL"),
+                         static_cast<int>(armor.center.x) + 25, static_cast<int>(armor.center.y),
+                         24, {255, 255, 0, 255}});
     }
 
     // 左上角状态：本模块绘制帧率、装甲板数和灯条数。
-    rm_utils::DisplayText stats;
-    stats.content = "FPS: " + std::to_string(static_cast<int>(fps)) + " Armors: " + std::to_string(armors.size()) +
-                    " Lights: " + std::to_string(lights.size());
-    stats.x         = 20;
-    stats.y         = 20;
-    stats.size      = 24;
-    stats.color     = {255, 255, 0, 255}; // 黄色 (RGBA)
-    stats.thickness = 2;
-    texts.push_back(stats);
+    texts.push_back({fmt::format("FPS: {} Armors: {} Lights: {}", int(fps), armors.size(), lights.size()),
+                     20, 20, 24, {255, 255, 0, 255}, 2});
 
     show(bgr_img, texts, points, lines);
 }

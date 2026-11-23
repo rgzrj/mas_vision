@@ -4,8 +4,6 @@
 #include <opencv2/core.hpp>
 #include <cstdint>
 #include <optional>
-#include <iomanip>
-#include <ostream>
 
 namespace tool {
 
@@ -21,29 +19,5 @@ struct RecordedFrame
     std::optional<Eigen::Quaterniond> pose;
     int mode = 0;
 };
-
-/**
- * @brief 写入固定 CSV 表头及四元数所需的浮点精度。
- */
-inline void write_metadata_header(std::ostream &out)
-{
-    out << std::setprecision(17) << "frame_index,timestamp_ns,t_recv_ns,q_w,q_x,q_y,q_z,mode,pose_valid\n";
-}
-
-/**
- * @brief 按 w/x/y/z 顺序写入姿态；无姿态时写零占位及有效性标志。
- */
-inline void write_frame_metadata(std::ostream &out, const RecordedFrame &frame)
-{
-    out << frame.index << ',' << frame.timestamp_ns << ',' << frame.t_recv_ns << ',';
-    if (frame.pose)
-    {
-        const auto &q = *frame.pose;
-        out << q.w() << ',' << q.x() << ',' << q.y() << ',' << q.z();
-    }
-    else
-        out << "0,0,0,0";
-    out << ',' << frame.mode << ',' << bool(frame.pose) << '\n';
-}
 
 } // namespace tool

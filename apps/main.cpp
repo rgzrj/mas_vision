@@ -2,6 +2,7 @@
 #include <chrono>
 #include <csignal>
 #include <filesystem>
+#include <opencv2/core.hpp>
 #include <thread>
 
 #include "BS_thread_pool.hpp"
@@ -10,7 +11,6 @@
 #include "rm_utils/display/display.hpp"
 #include "apps/calibration/calibrate_camera.hpp"
 #include "apps/calibration/calibrate_handeye.hpp"
-#include "apps/calibration/calibrate_latency.hpp"
 #include "rm_utils/io/runtime_path.hpp"
 #include "rm_utils/io/media_recorder.hpp"
 #include "threads/hikcamera_thread/hikcamera_thread.hpp"
@@ -35,9 +35,9 @@ int main(int argc, char **argv)
     try
     {
         std::filesystem::current_path(rm_utils::project_root());
-        third_party::MasLog::init("logs/mas_vision.log", spdlog::level::debug, spdlog::level::info);
         if (argc > 1)
         {
+            third_party::MasLog::init("logs/mas_vision.log");
             const std::string command = argv[1];
             if (command == "calibrate_camera")
             {
@@ -47,30 +47,29 @@ int main(int argc, char **argv)
             {
                 return calibration::calibrate_handeye_main();
             }
-            else if (command == "calibrate_latency")
-            {
-                return calibration::calibrate_latency_main();
-            }
             else
             {
                 if (command != "--help")
                     fmt::print("未知命令: {}\n", command);
                 fmt::print("相机校准 : ./mas_vision calibrate_camera\n"
                            "手眼标定 : ./mas_vision calibrate_handeye\n"
-                           "传输延迟 : ./mas_vision calibrate_latency\n"
                            "录制 : ./mas_vision_record\n"
                            "回放 : ./mas_vision_replay\n");
                 return command == "--help" ? 0 : 1;
             }
         }
+        const auto output = tool::create_session_directory("output/live");
+        third_party::MasLog::init(tool::utf8(output / "app.log"));
         MAS_LOG_INFO("Mas Vision System Start");
 
-        // 显示模块
+        // OpenCV进程内统一单线程；OpenVINO推理线程仍由配置单独控制。
+        cv::setNumThreads(1);
+
+        // 显示模块。
         const std::filesystem::path aim_config_path  = "config/auto_aim.yaml";
         const std::filesystem::path buff_config_path = "config/auto_buff.yaml";
 
         auto &display     = rm_utils::Display::getInstance();
-        const auto output = tool::create_session_directory("output/live");
         display.start(buff_config_path, output);
 
         // 队列与线程池。相机只有router一个消费者，算法各自消费工作队列。
@@ -81,16 +80,33 @@ int main(int argc, char **argv)
 
         try
         {
+            // 任务异常先通知所有线程退出，再交给 future 传回主线程。
+            const auto submit_task = [&pool](auto task)
+            {
+                return pool.submit_task([task]
+                {
+                    try
+                    {
+                        task();
+                    }
+                    catch (...)
+                    {
+                        g_shutdown = true;
+                        throw;
+                    }
+                });
+            };
             // 五个任务只启动一次，切模式由router处理。
-            auto camera_future = pool.submit_task(
+            auto camera_future = submit_task(
                 [&] { threads::hikcamera_thread_func("config/hikcamera.yaml", camera_buffer_size, camera_buffer); });
-            auto serial_future = pool.submit_task([] { threads::serial_thread_func(); });
-            auto router_future = pool.submit_task([&] { threads::vision_router_func(*camera_buffer, armor_queue, buff_queue); });
-            auto armor_future = pool.submit_task([&] { threads::armor_thread_func(armor_queue, aim_config_path); });
-            auto buff_future = pool.submit_task([&] { threads::buff_thread_func(buff_queue, buff_config_path); });
+            auto serial_future = submit_task([] { threads::serial_thread_func(); });
+            auto router_future = submit_task([&] { threads::vision_router_func(*camera_buffer, armor_queue, buff_queue); });
+            auto armor_future  = submit_task([&] { threads::armor_thread_func(armor_queue, aim_config_path); });
+            auto buff_future   = submit_task([&] { threads::buff_thread_func(buff_queue, buff_config_path); });
+
             MAS_LOG_INFO("Thread pool created with {} threads; output: {}", pool.get_thread_count(),
                          tool::utf8(output));
-            // 5. 主线程处理SDL事件；线程入口捕获异常时会设置g_shutdown。
+            // 主线程处理SDL事件，收到退出通知后读取任务结果。
             while (!g_shutdown)
             {
                 display.poll();

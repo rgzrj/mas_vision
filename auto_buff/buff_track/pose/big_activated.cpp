@@ -60,7 +60,7 @@ std::vector<Board> reconstruct_big_activated(std::span<const LightArm> arms,
         return result;
     for (const auto &arm : arms)
     {
-        if (arm.pose.state != 2 || (arm.color != CampColor::RED && arm.color != CampColor::BLUE) ||
+        if (arm.pose.state != 2 || (arm.color != EnemyColor::RED && arm.color != EnemyColor::BLUE) ||
             arm.contour.size() < 8 || !arm.pose.valid[2] ||
             !std::isfinite(arm.pose.points[2].x) || !std::isfinite(arm.pose.points[2].y) ||
             cv::norm(arm.pose.points[2] - projected_r[0]) > config.init_center_gate)

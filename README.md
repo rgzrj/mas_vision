@@ -7,7 +7,6 @@ Linux装甲板与打符视觉。实机通过电控mode选择armor/buff，两个�
 ./build/mas_vision
 ./build/mas_vision calibrate_camera
 ./build/mas_vision calibrate_handeye
-./build/mas_vision calibrate_latency
 ./build/mas_vision_record config/record.yaml
 ./build/mas_vision_replay config/replay.yaml
 ./build/mas_vision_replay config/media.yaml

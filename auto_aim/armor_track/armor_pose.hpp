@@ -16,7 +16,6 @@ class ArmorPose
     /**
      * @brief 构造函数
      * @param config_path 相机配置文件路径
-     * @param track_config_path 跟踪配置文件路径
      */
       ArmorPose(const std::string &config_path = "config/hikcamera.yaml");
       ~ArmorPose();

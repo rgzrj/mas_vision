@@ -27,6 +27,9 @@ mas_vision plotter 接收端
     # 自定义曲线（逗号分隔，支持嵌套 key)
     python3 tools/plot_monitor.py --keys w,r,send_packet.target_yaw
 
+    # 指定配套程序日志
+    python3 tools/plot_monitor.py --log output/live/本次会话/app.log
+
     # 只录制不绘图（无第三方依赖）
     python3 tools/plot_monitor.py --no-gui
 
@@ -126,8 +129,9 @@ def default_run_dir():
 
 
 def find_base_log():
-    log_dir = Path(__file__).resolve().parents[1] / "logs"
-    logs = list(log_dir.glob("mas_vision_*.log"))
+    root = Path(__file__).resolve().parents[1]
+    logs = list((root / "output/live").glob("*/app.log"))
+    logs += list((root / "output/replay").glob("*/app.log"))
     return max(logs, key=lambda path: path.stat().st_mtime) if logs else None
 
 # ---------------------------------------------------------------- 工具
@@ -405,9 +409,12 @@ def main():
     ap.add_argument("--refresh", type=float, default=25.0, help="画面刷新率 Hz")
     ap.add_argument("--buflen", type=int, default=20000, help="每条曲线的环形缓冲长度")
     ap.add_argument("--outdir", default=None, help="CSV 输出目录；省略时自动创建 output/profiling/plotter/run_时间")
+    ap.add_argument("--log", type=Path, help="配套程序日志；省略时尝试查找最近的实机或回放日志")
     ap.add_argument("--no-gui", action="store_true", help="只录制，不绘图")
     ap.add_argument("--list", action="store_true", help="列出收到的所有字段名后退出")
     args = ap.parse_args()
+    if args.log and not args.log.is_file():
+        ap.error(f"程序日志不存在: {args.log}")
 
     if args.keys:
         curves = [(k.strip(), k.strip()) for k in args.keys.split(",") if k.strip()]
@@ -419,6 +426,7 @@ def main():
     outdir = Path(args.outdir).expanduser().resolve() if args.outdir else default_run_dir()
     outdir.mkdir(parents=True, exist_ok=True)
     plot_logs_dir.mkdir(parents=True, exist_ok=True)
+    base_log = args.log.resolve() if args.log else find_base_log()
     for name in ("auto_aim.yaml", "hikcamera.yaml"):
         source = project_root / "config" / name
         if source.exists() and not (outdir / name).exists():
@@ -442,7 +450,6 @@ def main():
     pid_file = plot_logs_dir / "plot_monitor.pid"
     (plot_logs_dir / "latest_run.txt").write_text(str(outdir) + "\n", encoding="utf-8")
     pid_file.write_text(str(os.getpid()) + "\n", encoding="ascii")
-    rx.buffers = buffers
     rx.start()
 
     print(f"监听 {args.bind}:{args.port}")
@@ -463,12 +470,13 @@ def main():
         rx.join()
         recorder.close()
         print(f"\n共接收 {rx.count} 包，解析失败 {rx.bad} 包")
-        base_log = find_base_log()
+        if base_log is None:
+            base_log = find_base_log()
         if base_log and base_log.exists():
             shutil.copy2(base_log, outdir / "base.log")
             print(f"程序日志 -> {outdir / 'base.log'}")
         else:
-            print("未找到 build/logs/mas_vision_*.log，未复制程序日志")
+            print("未找到程序日志；可用 --log 指定本次 app.log")
         if pid_file.exists() and pid_file.read_text(encoding="ascii").strip() == str(os.getpid()):
             pid_file.unlink()
         sys.stdout, sys.stderr = original_stdout, original_stderr

@@ -1,5 +1,36 @@
 # 神符YOLO入门手册：标数据、训练、排错与部署
 
+部署补充（2026-11-22）：CMake 的 `YOLO_RUNTIME` 选择推理 SDK，默认 `OPENVINO`，Jetson 可选 `TENSORRT`。只编译、链接选中的 SDK；`auto_buff.detect.yolo.device` 再选择设备。OpenVINO 支持 CPU 单槽同步、GPU 双槽异步，`threads` 仅 CPU 读取；TensorRT 使用 GPU 双槽异步，不读取 CPU 线程数。设备不可用时直接报错，不自动回退。
+
+实机通过 `BuffDetector::create(config)` 构造检测器。所有后端使用 `submit()` / `collect()`；GPU 固定两个请求，满槽返回 false，结果按提交顺序交付，推理请求由 YOLO 内部管理。工作线程负责配对帧与有效期检查。
+
+`observation/` 负责把模型输出转换为公共检测观测，`pixels/` 提供原图判色、轮廓提取和像素精修。
+
+`yolo.cpp` 负责解码、观测转换和精修；`inference.cpp` 共用预处理、帧上下文和 FIFO，`openvino.cpp` / `tensorrt.cpp` 各自管理厂商资源。对外检测接口不变，厂商头文件不进入 `yolo.hpp` 或 `inference.hpp`。
+
+### Orin NX：构建与运行
+
+需要 TensorRT 10 及以上的开发包、CUDA Toolkit 和工程原有依赖；当前按 TensorRT 10.3 API 接入。engine 在目标 Jetson 上提前生成，启动程序只加载，不在线转换；更换硬件或 TensorRT 后重新生成。
+
+```bash
+mkdir -p output/engines
+/usr/src/tensorrt/bin/trtexec \
+  --onnx=auto_buff/buff_detect/yolo/model/rune_szu.onnx \
+  --saveEngine=output/engines/rune_szu_fp16.engine \
+  --fp16 --inputIOFormats=fp32:chw --outputIOFormats=fp32:chw --skipInference
+
+cmake -S . -B build-trt -DCMAKE_BUILD_TYPE=Release \
+  -DYOLO_RUNTIME=TENSORRT -DBUILD_TESTING=ON
+cmake --build build-trt --target mas_vision tensorrt_execution_test -j4
+./build-trt/tensorrt_execution_test output/engines/rune_szu_fp16.engine
+```
+
+在原 YAML 的 `auto_buff.detect` 下选 `backend: yolo`，仅将 `yolo.model` 改为 `../output/engines/rune_szu_fp16.engine`，`yolo.device` 设为 `GPU`。共有颜色和 debug 配置照旧。运行 `./build-trt/mas_vision`。
+
+engine 内部允许 FP16，外部接口固定 FP32/LINEAR，输入 `[1,3,480,640]`、输出 `[1,18,6300]`；不接受动态尺寸或带额外输出的模型。测试检查 FIFO、满槽拒收、槽位复用和带在途请求销毁，性能及识别精度需另行上机验收。CTest 未提供 engine 时跳过此硬件测试；几何与像素精修检查仍运行，固定使用 OpenVINO/CPU 的检查不运行。
+
+Intel 机器继续使用默认配置，或显式传 `-DYOLO_RUNTIME=OPENVINO`；模型仍使用 XML/ONNX。TensorRT 路径不加载 OpenVINO。
+
 更新：2026-10-29。面向刚接触模型训练的队员。目标是让自制符训练模型与深大模型共用一套C++程序，先验证小符。训练在外部机器完成，部署目标为i9-12900HK小主机、OpenVINO CPU，完整链争取持续80FPS；性能必须实测。
 
 2026-10-30补充：结合AT_NN_Detector的工程经验，增加实验对照、分数与点位误差排查、量化退化定位的图文说明；本工程三类五点接口不变。
@@ -334,7 +365,7 @@ Precision=TP/(TP+FP)，Recall=TP/(TP+FN)。阈值改变会同时影响二者；�
 
 注意：通道2是大符激活的类别分数，关键点2是R，它们是不同的索引。R坐标位于通道9、10，R置信度位于通道11。输出没有额外的检测框四通道，也没有单独的objectness通道；第5节TXT的20列是标注容器，不能当成网络输出通道数。
 
-[pose_output.cpp](pose_output.cpp)按`data[c * N + n]`读取第n个候选的第c个通道，其中`N=6300`。类别取通道0～2中的最高分；第k个关键点分别读取通道`3+3*k`、`4+3*k`、`5+3*k`作为x、y、置信度。类别与点分数已在模型内激活，不再重复做sigmoid；x、y仍是网络画布上的像素坐标。
+[pose_output.cpp](observation/pose_output.cpp)按`data[c * N + n]`读取第n个候选的第c个通道，其中`N=6300`。类别取通道0～2中的最高分；第k个关键点分别读取通道`3+3*k`、`4+3*k`、`5+3*k`作为x、y、置信度。类别与点分数已在模型内激活，不再重复做sigmoid；x、y仍是网络画布上的像素坐标。
 
 令原图W×H，$s=\min(640/W,480/H)$，实际缩放尺寸$W'=round(sW),H'=round(sH)$，左上填充为整数$p_x=\lfloor(640-W')/2\rfloor,p_y=\lfloor(480-H')/2\rfloor$。对应解码：
 
@@ -349,7 +380,7 @@ $$u=(x_{net}-p_x)/s,\qquad v=(y_{net}-p_y)/s.$$
 ```powershell
 .\build\buff_detect_test.exe --self-test yolo
 .\build\buff_pose_test.exe
-.\build\buff_detect_test.exe tests/auto_buff/yolo_pose.yaml
+.\build\buff_preview.exe tests/auto_buff/yolo_pose.yaml
 ```
 
 前两条是基准自检；第三条按YAML的model处理视频。检查新权重必须修改model；只运行基准自检不会自动验证新文件。没有同步姿态的手持视频不能用来证明世界位姿精度。
@@ -417,9 +448,9 @@ CPU＋核显可以作为独立对照；累计吞吐可以把不同请求分给�
 
 - [训练交接标准](../../../TRAINING_YOLO_POSE.md)：与本文配套，以最终接口要求为准。
 - [坐标变换与跟踪教程](../../buff_track/README.md)：说明五点为什么要对应真实物理位置。
-- [pose_output.cpp](pose_output.cpp)：18通道、原图坐标恢复与公共观测转换。
-- [pixel_geometry.cpp](pixel_geometry.cpp)：判色和大符灯臂轮廓提取。
-- [pixel_refiner.cpp](pixel_refiner.cpp)：由 `feature_points` 开关控制的可选像素精修。
+- [pose_output.cpp](observation/pose_output.cpp)：18通道、原图坐标恢复与公共观测转换。
+- [pixel_geometry.cpp](pixels/pixel_geometry.cpp)：判色和大符灯臂轮廓提取。
+- [pixel_refiner.cpp](pixels/pixel_refiner.cpp)：由 `feature_points` 开关控制的可选像素精修。
 - [深大原项目](https://github.com/SZURPVision/RuneDetectionModel)：模型与标注示例参考；实际点序以解码的R索引2为准。
 - [FSDL数据课程](https://fullstackdeeplearning.com/course/2022/lecture-4-data-management/)与[排错课程](https://fullstackdeeplearning.com/course/2022/lecture-3-troubleshooting-and-testing/)：用于理解数据与训练排错方法。
 

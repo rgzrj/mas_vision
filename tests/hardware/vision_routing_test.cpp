@@ -35,6 +35,15 @@ int main()
         require(!commands.submit(old, VisionCommand::Clock::now(), 100ms, {true, 1, 1, 1}),
                 "A->B->A accepted an old epoch");
         const auto current = commands.state();
+        require(commands.submit(current, VisionCommand::Clock::now(), 1s, {true, .25f, -.5f, 1}),
+                "Could not seed last command angles");
+        require(!commands.clear(old), "Old frame cancelled the current command");
+        require(commands.packet(VisionCommand::Clock::now()).found, "Current command was cleared by old frame");
+        require(commands.clear(current), "Could not clear current command");
+        const auto cleared = commands.packet(VisionCommand::Clock::now());
+        require(!cleared.found && !cleared.fire_advice && cleared.target_yaw == .25f && cleared.target_pitch == -.5f,
+                "Clearing a command copied zero angles or kept the command active");
+
         require(commands.submit(current, VisionCommand::Clock::now(), 100ms, {true, 1, 1, 1}),
                 "Current epoch rejected");
         const auto expired = commands.packet(VisionCommand::Clock::now() + 101ms);

@@ -13,6 +13,7 @@ enum class VisionTask
     small_rune,
     big_rune
 };
+
 struct VisionFrame
 {
     CameraFrame camera;

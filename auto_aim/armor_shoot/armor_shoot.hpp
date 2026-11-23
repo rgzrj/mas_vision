@@ -18,9 +18,9 @@ namespace auto_aim
 {
 enum class AimMode
 {
-    TRACK,     ///< 跟踪当前装甲板
-    CENTER,    ///< 高速时击打旋转中心
-    COMING     ///< 来板模式：选择正在靠近的装甲板
+    TRACK,  ///< 跟踪当前装甲板
+    CENTER, ///< 高速时击打旋转中心
+    COMING  ///< 来板模式：选择正在靠近的装甲板
 };
 
 /**
@@ -40,8 +40,13 @@ class ArmorShoot
   public:
     explicit ArmorShoot(const std::string &config_path = "config/auto_aim.yaml");
     ~ArmorShoot();
+
     void reset();
-    void disable_debug() noexcept { shoot_debug_.set_enabled(false); }
+    
+    void disable_debug() noexcept
+    {
+        shoot_debug_.set_enabled(false);
+    }
 
     /**
      * @brief 计算发射指令
@@ -62,10 +67,10 @@ class ArmorShoot
   private:
     double comming_angle_           = 60 / 57.3; ///< 来板模式角度阈值（弧度）
     double leaving_angle_           = 20 / 57.3; ///< 离开模式角度阈值（弧度）
-    double spinning_threshold_high_ = 6.28 ;     ///< 高速旋转阈值（rad/s）
-    double spinning_threshold_low_  = 2 ;        ///< 低速旋转阈值（rad/s）
+    double spinning_threshold_high_ = 6.28;      ///< 高速旋转阈值（rad/s）
+    double spinning_threshold_low_  = 2;         ///< 低速旋转阈值（rad/s）
 
-    int    lock_id_ = -1;          ///< 当前锁定的模型装甲板 ID
+    int   lock_id_           = -1;  ///< 当前锁定的模型装甲板 ID
     float last_target_yaw_   = 0.0; ///< 连续化后的目标 yaw（跨帧累加，可超出 ±π）
     float last_target_pitch_ = 0.0; ///< 连续化后的目标 pitch（跨帧累加，可超出 ±π）
 
@@ -78,21 +83,20 @@ class ArmorShoot
     AimPoint chooseAimPoint(const Target &target);
 
     // 配置参数
+    double yaw_offset_           = 0.0;        ///< yaw 偏移量（弧度）
+    double pitch_offset_         = 0.0;        ///< pitch 偏移量（弧度）
+    double fire_delay_time_      = 0.02;       ///< 发弹延迟时间（秒）
+    double yaw_tolerance_near_   = 2.0 / 57.3; ///< 3 m 内 yaw 发弹容差（rad）
+    double yaw_tolerance_far_    = 1.0 / 57.3; ///< 3 m 外 yaw 发弹容差（rad）
+    double pitch_tolerance_near_ = 2.0 / 57.3; ///< 3 m 内 pitch 发弹容差（rad）
+    double pitch_tolerance_far_  = 1.0 / 57.3; ///< 3 m 外 pitch 发弹容差（rad）
+    double bullet_speed_         = 25.0;       ///< 子弹初速度（m/s）
+    double gravity_              = 9.81;       ///< 重力加速度（m/s²）
+    double air_resistance_       = 0.003;      ///< 二次空气阻力系数（1/m）
 
-    double yaw_offset_           = 0.0;         ///< yaw 偏移量（弧度）
-    double pitch_offset_         = 0.0;         ///< pitch 偏移量（弧度）
-    double fire_delay_time_      = 0.02;        ///< 发弹延迟时间（秒）
-    double yaw_tolerance_near_   = 2.0 / 57.3;  ///< 3 m 内 yaw 发弹容差（rad）
-    double yaw_tolerance_far_    = 1.0 / 57.3;  ///< 3 m 外 yaw 发弹容差（rad）
-    double pitch_tolerance_near_ = 2.0 / 57.3;  ///< 3 m 内 pitch 发弹容差（rad）
-    double pitch_tolerance_far_  = 1.0 / 57.3;  ///< 3 m 外 pitch 发弹容差（rad）
-    double bullet_speed_         = 25.0;        ///< 子弹初速度（m/s）
-    double gravity_              = 9.81;        ///< 重力加速度（m/s²）
-    double air_resistance_       = 0.003;       ///< 二次空气阻力系数（1/m）
-    ShootDebug shoot_debug_;                    ///< 火控调试子类，继承公共开关、FPS和显示操作
-    bool   plotter_enable_       = false;       ///< plotter 输出开关
+    ShootDebug shoot_debug_;                     ///< 火控调试子类，继承公共开关、FPS和显示操作
+    bool       plotter_enable_ = false;          ///< plotter 输出开关
     std::unique_ptr<rm_utils::Plotter> plotter_; ///< plotter 实例
-
 };
 
 } // namespace auto_aim

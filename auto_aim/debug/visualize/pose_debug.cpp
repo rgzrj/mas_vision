@@ -2,6 +2,7 @@
 #include "math_tools.hpp"
 
 #include <cmath>
+#include <spdlog/fmt/fmt.h>
 
 namespace auto_aim
 {
@@ -17,83 +18,40 @@ void PoseDebug::draw(const cv::Mat &bgr_img, const std::vector<Armor> &armors, c
     int text_y = 50;
 
     // 同帧 IMU 姿态：由云台到世界的旋转矩阵提取 YPR（度）。
-    Eigen::Matrix3d R_gimbal2world = pose.Get_R_gimbal2world();
-    Eigen::Vector3d imu_ypr        = rm_utils::eulers(R_gimbal2world, 2, 1, 0);
-    rm_utils::DisplayText imu_text;
-    imu_text.content = "  IMU YPR: [" + std::to_string(imu_ypr.x() * 57.3f).substr(0, 5) + ", " +
-                       std::to_string(imu_ypr.y() * 57.3f).substr(0, 5) + ", " +
-                       std::to_string(imu_ypr.z() * 57.3f).substr(0, 5) + "] deg";
-    imu_text.x         = 20;
-    imu_text.y         = text_y;
-    imu_text.size      = 32;
-    imu_text.color     = {255, 255, 0, 0};
-    imu_text.thickness = 1;
-    texts.push_back(imu_text);
-    text_y += imu_text.size;
+    const auto imu_ypr = rm_utils::eulers(pose.Get_R_gimbal2world(), 2, 1, 0);
+    texts.push_back({fmt::format("  IMU YPR: [{:.2f}, {:.2f}, {:.2f}] deg",
+                                rm_utils::rad2deg(imu_ypr.x()), rm_utils::rad2deg(imu_ypr.y()),
+                                rm_utils::rad2deg(imu_ypr.z())),
+                     20, text_y, 32, {255, 255, 0, 255}});
+    text_y += 32;
 
-    // 首块装甲板：云台/世界坐标（米），YPR（度）和 YPD（前两项为度，距离为米）。
+    // 首块装甲板：坐标为米，YPR及YPD的前两项由弧度换算为度。
     if (!armors.empty())
     {
         const auto &armor = armors[0];
-        rm_utils::DisplayText gimbal_xyz_text;
-        gimbal_xyz_text.content = "  Gimbal XYZ: [" + std::to_string(armor.xyz_in_gimbal.x()).substr(0, 5) + ", " +
-                                  std::to_string(armor.xyz_in_gimbal.y()).substr(0, 5) + ", " +
-                                  std::to_string(armor.xyz_in_gimbal.z()).substr(0, 5) + "] m";
-        gimbal_xyz_text.x         = 20;
-        gimbal_xyz_text.y         = text_y;
-        gimbal_xyz_text.size      = 32;
-        gimbal_xyz_text.color     = {255, 255, 255, 255};
-        gimbal_xyz_text.thickness = 1;
-        texts.push_back(gimbal_xyz_text);
-        text_y += gimbal_xyz_text.size;
-
-        rm_utils::DisplayText gimbal_ypr_text;
-        gimbal_ypr_text.content = "  Gimbal YPR: [" + std::to_string(armor.ypr_in_gimbal.x() * 57.3f).substr(0, 5) +
-                                  ", " + std::to_string(armor.ypr_in_gimbal.y() * 57.3f).substr(0, 5) + ", " +
-                                  std::to_string(armor.ypr_in_gimbal.z() * 57.3f).substr(0, 5) + "] deg";
-        gimbal_ypr_text.x         = 20;
-        gimbal_ypr_text.y         = text_y;
-        gimbal_ypr_text.size      = 32;
-        gimbal_ypr_text.color     = {255, 255, 255, 255};
-        gimbal_ypr_text.thickness = 1;
-        texts.push_back(gimbal_ypr_text);
-        text_y += gimbal_ypr_text.size;
-
-        rm_utils::DisplayText world_xyz_text;
-        world_xyz_text.content = "  World XYZ: [" + std::to_string(armor.xyz_in_world.x()).substr(0, 5) + ", " +
-                                 std::to_string(armor.xyz_in_world.y()).substr(0, 5) + ", " +
-                                 std::to_string(armor.xyz_in_world.z()).substr(0, 5) + "] m";
-        world_xyz_text.x         = 20;
-        world_xyz_text.y         = text_y;
-        world_xyz_text.size      = 32;
-        world_xyz_text.color     = {255, 255, 255, 255};
-        world_xyz_text.thickness = 1;
-        texts.push_back(world_xyz_text);
-        text_y += world_xyz_text.size;
-
-        rm_utils::DisplayText world_ypr_text;
-        world_ypr_text.content = "  World YPR: [" + std::to_string(armor.ypr_in_world.x() * 57.3f).substr(0, 5) + ", " +
-                                 std::to_string(armor.ypr_in_world.y() * 57.3f).substr(0, 5) + ", " +
-                                 std::to_string(armor.ypr_in_world.z() * 57.3f).substr(0, 5) + "] deg";
-        world_ypr_text.x         = 20;
-        world_ypr_text.y         = text_y;
-        world_ypr_text.size      = 32;
-        world_ypr_text.color     = {255, 255, 255, 255};
-        world_ypr_text.thickness = 1;
-        texts.push_back(world_ypr_text);
-        text_y += world_ypr_text.size;
-
-        rm_utils::DisplayText world_ypd_text;
-        world_ypd_text.content = "  World YPD: [" + std::to_string(armor.ypd_in_world.x() * 57.3f).substr(0, 5) + ", " +
-                                 std::to_string(armor.ypd_in_world.y() * 57.3f).substr(0, 5) + ", " +
-                                 std::to_string(armor.ypd_in_world.z()).substr(0, 5) + "] deg";
-        world_ypd_text.x         = 20;
-        world_ypd_text.y         = text_y;
-        world_ypd_text.size      = 32;
-        world_ypd_text.color     = {255, 255, 255, 255};
-        world_ypd_text.thickness = 1;
-        texts.push_back(world_ypd_text);
-        text_y += world_ypd_text.size;
+        const auto &gimbal_xyz = armor.xyz_in_gimbal;
+        const auto &gimbal_ypr = armor.ypr_in_gimbal;
+        const auto &world_xyz = armor.xyz_in_world;
+        const auto &world_ypr = armor.ypr_in_world;
+        const auto &world_ypd = armor.ypd_in_world;
+        texts.push_back({fmt::format("  Gimbal XYZ: [{:.3f}, {:.3f}, {:.3f}] m",
+                                    gimbal_xyz.x(), gimbal_xyz.y(), gimbal_xyz.z()), 20, text_y, 32});
+        text_y += 32;
+        texts.push_back({fmt::format("  Gimbal YPR: [{:.2f}, {:.2f}, {:.2f}] deg",
+                                    rm_utils::rad2deg(gimbal_ypr.x()), rm_utils::rad2deg(gimbal_ypr.y()),
+                                    rm_utils::rad2deg(gimbal_ypr.z())), 20, text_y, 32});
+        text_y += 32;
+        texts.push_back({fmt::format("  World XYZ: [{:.3f}, {:.3f}, {:.3f}] m",
+                                    world_xyz.x(), world_xyz.y(), world_xyz.z()), 20, text_y, 32});
+        text_y += 32;
+        texts.push_back({fmt::format("  World YPR: [{:.2f}, {:.2f}, {:.2f}] deg",
+                                    rm_utils::rad2deg(world_ypr.x()), rm_utils::rad2deg(world_ypr.y()),
+                                    rm_utils::rad2deg(world_ypr.z())), 20, text_y, 32});
+        text_y += 32;
+        texts.push_back({fmt::format("  World YPD: [{:.2f}, {:.2f}, {:.3f}] deg",
+                                    rm_utils::rad2deg(world_ypd.x()), rm_utils::rad2deg(world_ypd.y()),
+                                    world_ypd.z()), 20, text_y, 32});
+        text_y += 32;
 
         if (armor.points.size() == 4)
         {
@@ -163,16 +121,11 @@ void PoseDebug::draw(const cv::Mat &bgr_img, const std::vector<Armor> &armors, c
                 }
                 reprojection_error /= 4.0;
 
-                rm_utils::DisplayText error_text;
-                error_text.content   = "  Reproj Error: " + std::to_string(reprojection_error).substr(0, 5) + " px";
-                error_text.x         = 20;
-                error_text.y         = text_y;
-                error_text.size      = 32;
-                error_text.color     = (reprojection_error < 5.0) ? rm_utils::DisplayColor{0, 255, 0, 255}
-                                                                  : rm_utils::DisplayColor{0, 0, 255, 255};
-                error_text.thickness = 1;
-                texts.push_back(error_text);
-                text_y += error_text.size;
+                texts.push_back({fmt::format("  Reproj Error: {:.3f} px", reprojection_error),
+                                 20, text_y, 32, reprojection_error < 5.0
+                                     ? rm_utils::DisplayColor{0, 255, 0, 255}
+                                     : rm_utils::DisplayColor{0, 0, 255, 255}});
+                text_y += 32;
             }
         }
     }

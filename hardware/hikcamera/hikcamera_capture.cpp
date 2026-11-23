@@ -8,16 +8,7 @@
 
 #include "mas_log.hpp"
 
-/*
-    主机与 MCU 两套独立时钟，
-    图像、姿态各自携带的时间戳存在传输延迟与随机抖动，
-    静态误差均值抵消看着准，云台转动时抖动叠加导致瞄准偏移；·
-    单纯姿态插值无法根治。需要要对齐两套时钟，或者在云台转动时使用图像时间戳作为姿态插值的参考时间戳。（目前仅手动减小误差）
-    准确的方案需要搭配 strobe 并以MCU的始终为准
-    当前方案实际公式  t_曝光中点 = t_recv − (实际曝光/2 + 传输延迟)
-
-    transfer_latency_ms_为传输延迟 由 `./base calibrate_latency` 标定
-*/
+// 按收帧时刻减去实际曝光的一半，估算曝光中点时间。
 
 // 采集线程：持续抓帧、转换、推入队列，并更新心跳时间戳。
 void hardware::HikCamera::captureLoop()
@@ -41,8 +32,7 @@ void hardware::HikCamera::captureLoop()
                     if (nRet == MV_OK)
                     {
                         auto t_recv    = std::chrono::steady_clock::now();
-                        auto offset    = std::chrono::microseconds(static_cast<int64_t>(
-                                                                exposure_actual_us_ / 2.0 + transfer_latency_ms_ * 1000.0));
+                        auto offset    = std::chrono::microseconds(static_cast<int64_t>(exposure_actual_us_ / 2.0));
                         data.t_recv    = t_recv;
                         data.timestamp = t_recv - offset;
 
@@ -230,6 +220,15 @@ cv::Mat hardware::HikCamera::processFrame(MV_FRAME_OUT *stOutFrame)
         return outImg;
     }
 
+    const auto now = std::chrono::steady_clock::now();
+    if (pixel_log_time_ == std::chrono::steady_clock::time_point{} ||
+        now - pixel_log_time_ >= std::chrono::seconds(5))
+    {
+        MAS_LOG_ERROR("Unsupported HikCamera pixel format=0x{:08x}, size={}x{}, frame={}",
+                      static_cast<uint32_t>(stOutFrame->stFrameInfo.enPixelType), width, height,
+                      stOutFrame->stFrameInfo.nFrameNum);
+        pixel_log_time_ = now;
+    }
     return cv::Mat();
 }
 

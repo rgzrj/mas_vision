@@ -29,7 +29,7 @@ class ArmorDetector
           detect_color_ = color;
       }
 
-      void disable_debug() noexcept { detect_debug_.set_enabled(false); } // 回放display=false时禁止绘制。
+      void disable_debug() noexcept { detect_debug_.set_enabled(false); } 
 
   private:
     /**
@@ -39,6 +39,16 @@ class ArmorDetector
      * @return std::vector<LightBar>，找到的灯条
      */
     std::vector<LightBar> findLights(const cv::Mat &bin_img, const cv::Mat &src_img) noexcept;
+
+    /**
+     * @brief 按目标颜色筛选灯条，保留中性灯条供后续配板
+     * @param lightbar 待筛选灯条，判色后更新颜色及目标颜色确认标志
+     * @param src_img 原始 BGR 图像；为空或非三通道时跳过判色，保留原字段
+     * @return true 保留灯条，不代表已确认目标颜色
+     * @return false 灯条颜色相反或采样轴退化
+     */
+    bool filterLightColor(LightBar &lightbar, const cv::Mat &src_img) const;
+
     /**
      * @brief 根据灯条匹配装甲板
      * @param lights 找到的灯条

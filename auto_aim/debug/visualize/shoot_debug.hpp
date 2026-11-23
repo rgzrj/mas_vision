@@ -13,10 +13,10 @@ struct AimPoint;
 /**
  * @brief 瞄准与火控信息的调试绘制
  */
-class ShootDebug : public ArmorDebug
+class ShootDebug : public ArmorDebugBase
 {
 public:
-    explicit ShootDebug(bool enabled = false) : ArmorDebug(enabled, "HikCamera_shoot") {}
+    explicit ShootDebug(bool enabled = false) : ArmorDebugBase(enabled, "HikCamera_shoot") {}
 
     // 绘制云台角、目标角、角误差和瞄准信息；关闭 debug 时立即返回。
     void draw(const cv::Mat &bgr_img, const std::optional<Target> &target, const SendPacket &packet,

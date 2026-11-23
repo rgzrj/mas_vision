@@ -1,31 +1,40 @@
-# 测试与独立检查
+# 模块逻辑回归
 
-所有目标在tests/CMakeLists.txt登记，直接链接生产模块；不复制滤波、检测或火控实现。
+测试直接调用生产模块，使用固定输入和断言检查结果。需要人工观察的设备诊断、曲线和测速入口见 [tools/README.md](../tools/README.md)。
+
+| 目录 | 被测内容 |
+|---|---|
+| auto_aim/ | 装甲板检测、位姿、业务绘制与自瞄回放 |
+| auto_buff/ | 传统/YOLO 检测、推理队列、位姿、跟踪、预测、火控和调试输出 |
+| hardware/ | 包布局、CRC、串口状态、命令有效期和帧池 |
+| threads/ | 路由、模式切换、帧有效期和进程级 OpenCV 线程设置 |
+| rm_utils/display/ | 显示生命周期、图元、事件、RRD 曲线清理与读回 |
+| rm_utils/io/ | 帧元数据格式与错误输入 |
+| rm_utils/plotter_test.cpp | UDP 数据发送与错误恢复 |
+| apps/ | 录制/配对读取、回放和播放控制的集成行为 |
+| third_party/ | 项目 mas_log 封装的过滤、初始化、并发和退出收尾 |
+| cmake/ | SDK 查找规则 |
+| common/ | 断言、临时目录、合成观测和内存串口替代实现 |
+| data/ | 固定图片与输入素材 |
 
 ```bash
-cmake -S . -B build -DBUILD_TESTING=ON
-cmake --build build -j8
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+cmake --build build -j4
 ctest --test-dir build --output-on-failure
 ```
 
-- auto_buff：检测、位姿、大符灯臂几何、跟踪、运动拟合、火控。
-- app/replay_test.cpp：配对IO、旧session兼容、快照、模式颜色、暂停相关控制及播放速度不影响算法。
-- app/armor_replay_test.cpp：armor的paired/media输入、模式过滤和缺姿态处理。
-- app/armor_visual_test.cpp：执行生产绘制和算法内部直接调用，验证灯条/角点、位姿重投影、预热模型、完整跟踪/火控文本、YAML全关与回放禁用显示；同时核对SendPacket及打符算法内部调试与最终过滤时机，不启动窗口。
-- app/display_lifecycle_test.cpp：真实Display/SDL，验证全关时不创建会话，领域注册前不启动后端，以及注册后的独立窗口与资源收尾。
-- app/armor_plotter_test.cpp：关闭GUI后实际接收UDP，核对预热期手眼原始四点、同帧旋转矩阵、缺观测时有效标志及shoot原字段。测试占用127.0.0.1:9870，端口被monitor占用时跳过；关掉monitor后再运行即可。
-- hardware/vision_routing_test.cpp：切模式中的旧结果、A→B→A、命令过期和姿态插值范围。
-- hardware/serial_state_test.cpp：使用生产user_serial.cpp解析器，内存传输只替换串口IO，验证UserSerial内部姿态插值、越界/大间隔拒绝、重连丢弃旧姿态，以及满队列仍更新mode和通信时间、13字节发送与过期处理。
-- hardware/router_runtime_test.cpp：生产router配内存串口，验证配置读取debug开关、armor/小符/大符任务及帧有效期传递、无图像时定时退出和非法runtime参数拒绝，不访问真实硬件。
-- app/display_test.cpp、buff_debug_test.cpp、sdl_display_test.cpp：绘制、无效状态清理、独立窗口和运行时调试开关。
-- app/sdl_input_test.cpp：标定保存/清空按键、按住不重复保存、关闭事件，以及原有回放暂停/单步按键。
-- hardware/camera_test.cpp、serial_test.cpp：显式传配置才访问设备；CTest仅运行相机帮助和串口协议自检。
-- tools：模型检查、官方推理测速、静态检查、yolo_profile、buff_profile。
+`BUILD_TESTING` 与 `BUILD_TOOLS` 分别控制测试和工具。`VISION_GPU_PROFILE_ONLY=ON` 保留 OpenVINO GPU 轻量入口，构建 gpu_live_profile、live_profile_test、yolo_execution_test，CTest 运行后两个执行回归。TensorRT 不接受这个选项。
 
-固定素材为tests/data/img/input.png和szu_reference.jpg，分别用于传统与YOLO自检。检测示例配置在tests/auto_buff/yolo_pose.yaml。
+OpenVINO 下执行 CPU/GPU 生产检测接口检查。TensorRT 下执行通用几何和像素精修回归，engine 检查需要目标设备生成的模型，未传入时返回 77。模型和真实 GPU 依赖应单独准备。
 
-相机/串口工具日志位于output/profiling/<时间>/。自动回归临时目录由测试自行清理；tests/output仅为历史材料，不再作为默认输出。
+```bash
+./build/tensorrt_execution_test output/engines/rune_szu_fp16.engine
+python3 tests/rm_utils/display/check_rerun_scalars.py ./build/rerun_scalar_test
+python3 tests/cmake/test_openvino_discovery.py
+```
 
-测试构建仍需正式工程的Linux依赖及真实MVS SDK，帮助、自检和内存串口测试不打开设备。通过回归不代表已完成实机精度或帧率验收。
+Rerun 的 C++ 程序生成 RRD，Python 脚本读回并检查有限值、NaN/Inf 清理、历史与恢复。配置时 Python 环境支持 `rerun.chunk.RrdReader` 才登记该读回测试，否则显示依赖提示。
 
-独立整链路测速：`./build/buff_profile config/auto_buff.yaml image.png 600`。重复调用生产算法，关闭图像调试，结果在 output/profiling/<时间>/performance.csv；汇总使用 tools/summarize_performance.py。图片没有相机采集延迟，模型无法初始化时也不代表测到了有效跟踪/火控负载。
+固定图片为 data/img/input.png 和 szu_reference.jpg，检测示例配置为 auto_buff/yolo_pose.yaml。人工图片／视频预览使用 `buff_preview config.yaml`，`buff_detect_test` 只运行固定输入自检。
+
+测试构建仍需要工程的 Linux 依赖。测试按模块访问模型和显示后端，硬件逻辑回归使用内存传输，真实相机和串口诊断由 tools 入口执行。默认超时 60 秒，router_runtime_test 为 10 秒，Plotter 端口不可用时按 77 跳过。临时目录由测试清理，历史 tests/output 材料保留。

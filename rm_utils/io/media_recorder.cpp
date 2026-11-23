@@ -1,8 +1,8 @@
 #include "media_recorder.hpp"
+#include "mas_log.hpp"
 #include <chrono>
 #include <ctime>
 #include <iomanip>
-#include <iostream>
 #include <sstream>
 #include <stdexcept>
 
@@ -52,16 +52,16 @@ void MediaRecorder::open_video(cv::VideoWriter &writer, std::filesystem::path &o
             if (writer.open(utf8(mp4), cv::VideoWriter::fourcc('m', 'p', '4', 'v'), fps_, size_))
             {
                 output = mp4;
-                std::cout << "Recording: " << utf8(output) << " (" << writer.getBackendName() << ")\n";
+                MAS_LOG_INFO("Recording: {} ({})", utf8(output), writer.getBackendName());
                 return;
             }
         }
         catch (const cv::Exception &error)
         {
-            std::cerr << "MP4 writer: " << error.what() << '\n';
+            MAS_LOG_WARN("MP4 writer: {}", error.what());
         }
         writer.release();
-        std::cerr << "MP4 encoder unavailable; trying AVI/MJPEG.\n";
+        MAS_LOG_WARN("MP4 encoder unavailable; trying AVI/MJPEG");
     }
     const auto avi = directory_ / (std::string(stem) + ".avi");
     // OpenCV 内置 MJPEG 编码器不依赖 FFmpeg 后端，用于 MP4 不可用时回退。
@@ -72,13 +72,13 @@ void MediaRecorder::open_video(cv::VideoWriter &writer, std::filesystem::path &o
             if (writer.open(utf8(avi), backend, cv::VideoWriter::fourcc('M', 'J', 'P', 'G'), fps_, size_))
             {
                 output = avi;
-                std::cout << "Recording: " << utf8(output) << " (" << writer.getBackendName() << ")\n";
+                MAS_LOG_INFO("Recording: {} ({})", utf8(output), writer.getBackendName());
                 return;
             }
         }
         catch (const cv::Exception &error)
         {
-            std::cerr << "AVI writer: " << error.what() << '\n';
+            MAS_LOG_WARN("AVI writer: {}", error.what());
         }
         writer.release();
     }

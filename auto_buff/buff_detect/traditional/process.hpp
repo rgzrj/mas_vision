@@ -5,6 +5,6 @@
 
 namespace auto_buff {
 
-auto extract_channel(const cv::Mat& src, CampColor camp, cv::Mat& dst) -> void;
+auto extract_channel(const cv::Mat& src, EnemyColor camp, cv::Mat& dst) -> void;
 
 }

@@ -51,6 +51,8 @@ class UserSerial
     void sendVision(float target_yaw = 0.0f, float target_pitch = 0.0f, uint8_t found = 0, uint8_t fire_advice = 0);
     /** 禁用视觉跟随和开火，保留最后一次目标角度。 */
     void disableVision();
+    /** 仅当该帧的模式和 epoch 仍有效时，撤销视觉指令。 */
+    bool disableVision(VisionState state);
     /*
      * @brief 发送数据包到串口，serial线程调用
      */

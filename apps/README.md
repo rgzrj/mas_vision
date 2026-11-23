@@ -1,7 +1,7 @@
 # 应用入口
 
 - `main.cpp`：实机唯一组装入口，初始化日志、信号、队列和显示，启动相机、串口、router、armor和buff五个任务；不处理逐帧结果。
-- `calibration/`：通过主程序的calibrate_camera、calibrate_handeye、calibrate_latency命令启动，分别标定内参、手眼和取图延迟；不启动实机算法线程。
+- `calibration/`：通过主程序的calibrate_camera、calibrate_handeye命令启动，分别标定内参和手眼外参；不启动实机算法线程。
 - `record/`：独立采集程序，不创建算法，不发送视觉控制包，不链接实机业务线程。
 - `replay/`：独立回放程序，按配置选择armor/buff和paired/media，复用生产逐帧算法。
 - `record/session.cpp/.hpp`：录制流程使用的快照工具，复制相机、串口、两套算法配置及模型；回放直接读取生成的文件，不调用本工具运行算法。

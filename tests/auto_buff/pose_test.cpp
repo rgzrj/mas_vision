@@ -3,8 +3,8 @@
 #include "auto_buff/buff_track/pose/rune_projection.hpp"
 #include "auto_buff/buff_track/pose/big_activated.hpp"
 #include "auto_buff/buff_track/track/buff_tracker.hpp"
-#include "auto_buff/buff_detect/yolo/pose_output.hpp"
-#include "auto_buff/buff_detect/yolo/pixel_geometry.hpp"
+#include "auto_buff/buff_detect/yolo/observation/pose_output.hpp"
+#include "auto_buff/buff_detect/yolo/pixels/pixel_geometry.hpp"
 #include "rm_utils/algorithm/math_tools.hpp"
 #include "rm_utils/algorithm/orientation.hpp"
 #include "tests/common/synthetic_rune.hpp"
@@ -56,7 +56,7 @@ static void check_big_activated(const std::filesystem::path &camera_yaml)
         // Render a filled physical silhouette independently of the production model point array.
         const auto render_arm = [&](double angle, cv::Mat &image) {
             LightArm arm;
-            arm.color = auto_buff::CampColor::RED;
+            arm.color = auto_buff::EnemyColor::RED;
             arm.pose.state = 2;
             arm.pose.score = .95;
             arm.pose.valid.fill(true);
@@ -115,13 +115,13 @@ static void check_big_activated(const std::filesystem::path &camera_yaml)
         }
         if (scenario == 0)
         {
-            auto blank_arm = make_pose_detection({arm.pose}, cv::Mat::zeros(image.size(), image.type()), auto_buff::CampColor::RED, false);
+            auto blank_arm = make_pose_detection({arm.pose}, cv::Mat::zeros(image.size(), image.type()), auto_buff::EnemyColor::RED, false);
             require(blank_arm.light_arms.size() == 1 && blank_arm.light_arms[0].contour.empty(),
                     "Blank ROI acquired a measured lamp contour");
             auto occluded_image = image.clone();
             const auto lamp_box = cv::boundingRect(arm.contour);
             cv::rectangle(occluded_image, {lamp_box.x, lamp_box.y, lamp_box.width / 2, lamp_box.height}, {}, -1);
-            const auto occluded = make_pose_detection({arm.pose}, occluded_image, auto_buff::CampColor::RED, false);
+            const auto occluded = make_pose_detection({arm.pose}, occluded_image, auto_buff::EnemyColor::RED, false);
             require(occluded.light_arms.empty() ||
                         reconstruct_big_activated(occluded.light_arms, intrinsic, distortion, camera_transform, {}, icons, boards).empty(),
                     "Heavily occluded silhouette produced a reliable-looking board center");
@@ -156,11 +156,11 @@ static void check_big_activated(const std::filesystem::path &camera_yaml)
             for (int i : {0, 1, 3, 4}) cv::circle(image, seed.points[i], 3, {0, 0, 255}, -1);
             for (bool refine : {false, true})
             {
-                auto detection = make_pose_detection({seed, arm.pose}, image, auto_buff::CampColor::RED, refine);
+                auto detection = make_pose_detection({seed, arm.pose}, image, auto_buff::EnemyColor::RED, refine);
                 detection.raw_poses = {seed, arm.pose};
                 require(detection.light_arms[0].pose.points == arm.pose.points,
                         "Contour extraction overwrote raw NN keypoints");
-                filter_rune_observations(detection, RuneMode::big, auto_buff::CampColor::RED);
+                filter_rune_observations(detection, RuneMode::big, auto_buff::EnemyColor::RED);
                 RmcsTracker tracker(camera_yaml, YAML::Node{});
                 const auto initialized = tracker.update(detection, 0, image);
                 require(initialized.initialized && initialized.geometry_boards.size() == 1,
@@ -172,7 +172,7 @@ static void check_big_activated(const std::filesystem::path &camera_yaml)
                             return match.feature_id > 0 && cv::norm(cv::Point2d(match.point.x, match.point.y) -
                                                                    initialized.geometry_boards[0].center) < 1.;
                         }), "Original RMCS correct() did not consume the derived active center");
-                const auto only_arm = make_pose_detection({arm.pose}, image, auto_buff::CampColor::RED, refine);
+                const auto only_arm = make_pose_detection({arm.pose}, image, auto_buff::EnemyColor::RED, refine);
                 RmcsTracker uninitialized(camera_yaml, YAML::Node{});
                 require(!uninitialized.update(only_arm, 0, image).initialized,
                         "An activated arm initialized RMCS without a pending board");
@@ -233,14 +233,14 @@ int main()
                 cv::circle(image, points[i], 4, {0, 0, 255}, -1);
         }
         const auto decoded = auto_buff::decode_pose_output(raw, 1, image.size(), 1, {}, .25, .8, 30);
-        observation        = auto_buff::make_pose_detection(decoded, image, auto_buff::CampColor::RED, false);
+        observation        = auto_buff::make_pose_detection(decoded, image, auto_buff::EnemyColor::RED, false);
         require(observation.markers.size() == 1 && observation.boards.size() == 1 &&
                     observation.boards.front().features_valid,
                 "SZU five-point protocol failed before PnP");
         // 指定红色检测后，无色 R 应配合红色待击板建立模型。
         auto_buff::RmcsTracker tracker(camera_yaml, YAML::Node{});
         const auto tracked = tracker.update(observation, 0, image);
-        require(tracked.initialized && tracked.color == auto_buff::CampColor::RED,
+        require(tracked.initialized && tracked.color == auto_buff::EnemyColor::RED,
                 "YOLO red selection prevented RMCS initialization with a real red board");
         std::vector<auto_buff::RuneIcon> icons;
         std::vector<auto_buff::RuneBullseye> boards;

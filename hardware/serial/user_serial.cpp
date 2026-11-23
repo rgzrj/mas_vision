@@ -180,6 +180,11 @@ void UserSerial::disableVision()
     commands_.clear();
 }
 
+bool UserSerial::disableVision(VisionState state)
+{
+    return commands_.clear(state);
+}
+
 void UserSerial::sendPacketToSerial()
 {
     while (!g_shutdown && (!isConnected || !serial_port || !serial_port->isOpen()))

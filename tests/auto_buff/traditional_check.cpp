@@ -1,3 +1,4 @@
+#include "tests/common/detection.hpp"
 #include "auto_buff/buff_detect/traditional/traditional.hpp"
 #include "auto_buff/buff_detect/traditional/rmcs/compat/thinning.hpp"
 #include "rm_utils/io/media_reader.hpp"
@@ -56,7 +57,6 @@ void write_camera(const fs::path &path, cv::Size size) {
 } // namespace
 
 void check_traditional() {
-    cv::setNumThreads(4);
     cv::RNG random(42);
     for (int i = 0; i < 12; ++i) {
         cv::Mat binary(32, 40, CV_8U);
@@ -71,9 +71,9 @@ void check_traditional() {
                   ("rmcs_detect_" +
                    std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".yaml");
     write_camera(camera, {640, 480});
-    auto_buff::TraditionalDetector detector(camera, "red", YAML::Load("save_masks: true"));
+    auto_buff::TraditionalDetector detector(tests::traditional_config("red", YAML::Load("save_masks: true")), YAML::LoadFile(camera.string()));
     cv::Mat blank = cv::Mat::zeros(480, 640, CV_8UC3);
-    auto empty = detector.detect(blank, 0);
+    auto empty = tests::detect(detector, blank, 0);
     require(empty.markers.empty() && empty.boards.empty() && empty.mask.size() == blank.size(),
             "Blank input or full-frame mask contract failed");
     cv::Mat ring = blank.clone();
@@ -84,11 +84,11 @@ void check_traditional() {
     host_yaml.remove("image_width");
     host_yaml.remove("image_height");
     std::ofstream(host_camera) << host_yaml;
-    auto_buff::TraditionalDetector host_detector(host_camera, "red", YAML::Node{});
-    require(host_detector.detect(ring, 0).boards.size() == 1,
+    auto_buff::TraditionalDetector host_detector(tests::traditional_config(), YAML::LoadFile(host_camera.string()));
+    require(tests::detect(host_detector, ring, 0).boards.size() == 1,
             "Host calibration without image dimensions cannot detect a ring");
     fs::remove(host_camera);
-    auto active = detector.detect(ring, 0);
+    auto active = tests::detect(detector, ring, 0);
     require(active.boards.size() == 1 && active.boards[0].appearance == auto_buff::Appearance::single_ring &&
                 !active.boards[0].features_valid,
             "Single ring must be active with no physical arm endpoints");
@@ -97,21 +97,21 @@ void check_traditional() {
     // 同一检测器切色，模拟电控覆盖本地红色后再恢复配置。
     cv::Mat blue_ring = blank.clone();
     cv::circle(blue_ring, {320, 240}, 60, {220, 0, 0}, 3, cv::LINE_AA);
-    require(detector.detect(blue_ring, 0).boards.empty(), "Red detector accepted a blue ring");
-    detector.set_color("blue");
-    auto blue = detector.detect(blue_ring, 0);
-    require(blue.boards.size() == 1 && blue.boards[0].color == auto_buff::CampColor::BLUE &&
-                detector.detect(ring, 0).boards.empty(),
+    require(tests::detect(detector, blue_ring, 0).boards.empty(), "Red detector accepted a blue ring");
+    detector.BuffDetector_Set_Color(auto_buff::EnemyColor::BLUE);
+    auto blue = tests::detect(detector, blue_ring, 0);
+    require(blue.boards.size() == 1 && blue.boards[0].color == auto_buff::EnemyColor::BLUE &&
+                tests::detect(detector, ring, 0).boards.empty(),
             "Runtime blue selection failed");
-    detector.set_color("red");
-    require(detector.detect(ring, 0).boards.size() == 1 && detector.detect(blue_ring, 0).boards.empty(),
+    detector.BuffDetector_Set_Color(auto_buff::EnemyColor::RED);
+    require(tests::detect(detector, ring, 0).boards.size() == 1 && tests::detect(detector, blue_ring, 0).boards.empty(),
             "Local red selection was not restored");
     cv::Mat disk = ring.clone();
     cv::circle(disk, {320, 240}, 33, {0, 0, 220}, 3, cv::LINE_AA);
     std::array<cv::Point, 4> tips{{{320, 170}, {250, 240}, {320, 310}, {390, 240}}};
     for (auto tip : tips)
         cv::line(disk, {320, 240}, tip, {0, 0, 255}, 5, cv::LINE_AA);
-    auto pending = detector.detect(disk, .1);
+    auto pending = tests::detect(detector, disk, .1);
     require(pending.boards.size() == 1 && pending.boards[0].appearance == auto_buff::Appearance::full_mark &&
                 pending.boards[0].features_valid,
             "Original RMCS four-arm extraction failed");
@@ -123,11 +123,11 @@ void check_traditional() {
             best = std::min(best, cv::norm(actual - cv::Point2d(tip)));
         require(best < 8, "Original RMCS endpoint differs from the physical synthetic tip");
     }
-    require(detector.detect(disk, .1).boards.size() == pending.boards.size(),
+    require(tests::detect(detector, disk, .1).boards.size() == pending.boards.size(),
             "Stateless RMCS gained temporal confirmation or timestamp reset rules");
     bool rejected = false;
     try {
-        detector.detect(cv::Mat::zeros(100, 100, CV_8UC3), 0);
+        tests::detect(detector, cv::Mat::zeros(100, 100, CV_8UC3), 0);
     } catch (const std::runtime_error &) {
         rejected = true;
     }
@@ -138,22 +138,23 @@ void check_traditional() {
     const auto calibration = YAML::LoadFile(camera.string());
     const auto intrinsic = calibration["camera_matrix"].as<std::array<double, 9>>();
     const auto distortion = calibration["distortion"].as<std::array<double, 5>>();
-    for (auto color : {auto_buff::CampColor::RED, auto_buff::CampColor::BLUE}) {
-        std::string name = color == auto_buff::CampColor::RED ? "red" : "blue";
+    for (auto color : {auto_buff::EnemyColor::RED, auto_buff::EnemyColor::BLUE}) {
+        std::string name = color == auto_buff::EnemyColor::RED ? "red" : "blue";
         auto_buff::RuneDetector original;
         original.config.intrinsic = cv::Mat(3, 3, CV_64F, const_cast<double *>(intrinsic.data())).clone();
         original.config.distortion = cv::Mat(1, 5, CV_64F, const_cast<double *>(distortion.data())).clone();
         original.config.color = color;
         auto expected = original.detect(photo);
-        auto_buff::TraditionalDetector adapted(camera, name, YAML::Load("save_masks: true"));
-        auto actual = adapted.detect(photo, 0);
+        auto_buff::TraditionalDetector adapted(tests::traditional_config(name, YAML::Load("save_masks: true")), calibration);
+        auto actual = tests::detect(adapted, photo, 0);
         require(actual.boards.size() == expected.bullseyes.size(),
                 "Adapter changed upstream detection count");
         require(actual.markers.size() == expected.icons.size(), "Adapter discarded upstream R candidates");
         for (std::size_t i = 0; i < expected.icons.size(); ++i) {
             require(cv::norm(actual.markers[i].center -
                              cv::Point2d(expected.icons[i].center.x, expected.icons[i].center.y)) < 1e-9 &&
-                        actual.markers[i].score == expected.icons[i].score && actual.markers[i].color == color,
+                        actual.markers[i].score == expected.icons[i].score && actual.markers[i].color == color &&
+                        actual.markers[i].observed,
                     "Adapter changed R candidate position/score/color");
         }
         for (std::size_t i = 0; i < expected.bullseyes.size(); ++i) {

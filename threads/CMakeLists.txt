@@ -5,4 +5,5 @@ add_library(vision_threads STATIC
     armor_thread/armor_thread.cpp
     buff_thread/buff_thread.cpp
     vision_router/vision_router.cpp)
-target_link_libraries(vision_threads PUBLIC buff_hardware auto_buff auto_aim)
+vision_target_options(vision_threads)
+target_link_libraries(vision_threads PUBLIC buff_hardware auto_buff auto_aim PRIVATE ${BUFF_YAML_TARGET})

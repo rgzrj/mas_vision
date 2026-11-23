@@ -71,7 +71,6 @@ class HikCamera : public Base_Camera
     int   reconnect_backoff_ms_     = kInitialBackoffMs; // 当前需要等待的退避间隔
 
     float exposure_actual_us_  = 0.0f;                  // 实际曝光时间（单位：微秒）
-    float transfer_latency_ms_ = 1.5f;                  // 传输延迟
     float exposure_time_;                               // 曝光时间
     float gain_;                                        // 增益
 
@@ -117,6 +116,7 @@ class HikCamera : public Base_Camera
     std::chrono::steady_clock::time_point last_reconnect_attempt_{};  //上一次重连的时间
     std::chrono::steady_clock::time_point last_fail_log_time_    {};  // 上一次打印"重连失败"日志的时间，
     std::chrono::steady_clock::time_point last_drop_log_time_    {};  // 上一次打印丢帧日志的时间（节流用）
+    std::chrono::steady_clock::time_point pixel_log_time_{}; // 不支持像素格式的诊断限频
 
   
     cv::Mat output_pool[kPoolCount];

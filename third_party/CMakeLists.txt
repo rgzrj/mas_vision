@@ -1,11 +1,16 @@
 # 工具已移动到 third_party；保留 buff_utils 作为复用工具的总目标。
 add_library(buff_utils STATIC mas_log/mas_log.cpp)
-target_link_libraries(buff_utils PUBLIC buff_options spdlog::spdlog Threads::Threads ${OpenCV_LIBS})
+vision_target_options(buff_utils)
+# 宏在包含 spdlog 头文件前生效；Release 不求值 DEBUG/TRACE 参数。
+target_compile_definitions(buff_utils PUBLIC
+    $<$<CONFIG:Debug>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_DEBUG>
+    $<$<NOT:$<CONFIG:Debug>>:SPDLOG_ACTIVE_LEVEL=SPDLOG_LEVEL_INFO>)
+
+target_link_libraries(buff_utils PUBLIC buff_options spdlog::spdlog Threads::Threads)
 target_include_directories(buff_utils PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/mas_log"
     "${CMAKE_CURRENT_SOURCE_DIR}/thread_pool"
     "${CMAKE_CURRENT_SOURCE_DIR}/SPSCQueue"
-    ${OpenCV_INCLUDE_DIRS}
 )
 # Tracy 的采集由 detect.tracy_debug 控制；禁用时不创建客户端线程。
 set(TRACY_ENABLE ON CACHE BOOL "" FORCE)

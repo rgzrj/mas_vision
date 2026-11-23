@@ -23,6 +23,7 @@ __pycache__/
 CMakeCache.txt
 CMakeFiles/
 compile_commands.json
+CMakeUserPresets.json
 
 # Large input media and historical training assets; keep tools and documentation
 /tests/data/video/

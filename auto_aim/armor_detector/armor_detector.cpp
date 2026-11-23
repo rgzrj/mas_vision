@@ -3,8 +3,7 @@
 
 #include <algorithm>
 #include <chrono>
-#include <exception>
-#include <fstream>
+#include <stdexcept>
 #include <opencv2/core/mat.hpp>
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
@@ -45,81 +44,56 @@ constexpr ColorMatch classifyTargetColor(int diff_sum, int valid_count)
 
 ArmorDetector::ArmorDetector(const std::string &config_path)
 {
-    // 禁用 OpenCV 多线程，避免在处理小任务时产生过多的线程切换和 yielding 开销
-    cv::setNumThreads(1);
+    // yaml 配置文件读取
+    const auto config         = YAML::LoadFile(config_path);
+    const auto armor_detector = config["auto_aim"]["armor_detector"];
+    if (!armor_detector.IsMap())
+        throw std::runtime_error("Missing auto_aim.armor_detector configuration: " + config_path);
 
-    // yaml 读取参数
-    try
+    const auto lights_params = armor_detector["lights_params"];
+    const auto armors_params = armor_detector["armors_params"];
+    const auto number_params = armor_detector["number_params"];
+    if (!lights_params.IsMap() || !armors_params.IsMap() || !number_params.IsMap())
+        throw std::runtime_error("Invalid armor_detector parameter groups: " + config_path);
+
+    detect_debug_.set_enabled(armor_detector["debug"].as<bool>(false));
+    // 读取二值化参数
+    binary_thres_ = armor_detector["binary_thres"].as<int>(90);
+    // 读取颜色参数
+    std::string color_str = armor_detector["detect_color"].as<std::string>("RED");
+    if (color_str == "blue" || color_str == "BLUE")
     {
-        // 检查文件是否存在
-        std::ifstream file(config_path);
-        if (!file.good())
-        {
-            MAS_LOG_ERROR("Config file not found: {}, using default values", config_path.c_str());
-            return;
-        }
-
-        YAML::Node config = YAML::LoadFile(config_path);
-        if (config["auto_aim"] && config["auto_aim"]["armor_detector"])
-        {
-            YAML::Node armor_detector = config["auto_aim"]["armor_detector"];
-            detect_debug_.set_enabled(armor_detector["debug"].as<bool>(false));
-            // 读取二值化参数
-            binary_thres_ = armor_detector["binary_thres"].as<int>(90);
-            // 读取颜色参数
-            std::string color_str = armor_detector["detect_color"].as<std::string>("RED");
-            if (color_str == "blue" || color_str == "BLUE")
-            {
-                detect_color_ = EnemyColor::BLUE;
-            }
-            else
-            {
-                detect_color_ = EnemyColor::RED;
-            }
-            // 读取参数
-            YAML::Node lights_params = armor_detector["lights_params"];
-            min_lightbar_ratio_      = lights_params["min_lightbar_ratio"].as<double>(0.1);
-            max_lightbar_ratio_      = lights_params["max_lightbar_ratio"].as<double>(0.5);
-            min_lightbar_length_     = lights_params["min_lightbar_length"].as<double>(8.0);
-            max_angle_error_         = lights_params["max_angle_error"].as<double>(20.0) / 57.3; // rad
-            max_lightbar_area_       = lights_params["max_lightbar_area"].as<double>(10000.0);
-
-            YAML::Node armors_params = armor_detector["armors_params"];
-            min_armor_ratio_         = armors_params["min_armor_ratio"].as<double>(0.7);
-            max_armor_ratio_         = armors_params["max_armor_ratio"].as<double>(0.8);
-            max_side_ratio_          = armors_params["max_side_ratio"].as<double>(3.2);
-            max_rectangular_error_   = armors_params["max_rectangular_error"].as<double>(3.2) / 57.3; // rad
-
-            // 读取数字识别参数
-            if (armor_detector["number_params"])
-            {
-                YAML::Node  number_params = armor_detector["number_params"];
-                std::string model_path    = number_params["model_path"].as<std::string>("../mas_auto_aim_armor/armor_detector/model/lenet.onnx");
-                std::string label_path    = number_params["label_path"].as<std::string>("../mas_auto_aim_armor/armor_detector/model/label.txt");
-                double      confidence    = number_params["classifier_threshold"].as<double>(0.7);
-
-                std::vector<std::string> ignore_classes;
-                // 读取忽略类别
-                if (number_params["ignore_classes"])
-                {
-                    ignore_classes.clear();
-                    for (const auto &cls : number_params["ignore_classes"])
-                    {
-                        ignore_classes.push_back(cls.as<std::string>());
-                    }
-                }
-                // 创建数字识别器
-                classifier = std::make_unique<NumberClassifier>(
-                    (std::filesystem::path(config_path).parent_path() / model_path).string(),
-                    (std::filesystem::path(config_path).parent_path() / label_path).string(), confidence,
-                    ignore_classes);
-            }
-        }
+        detect_color_ = EnemyColor::BLUE;
     }
-    catch (const std::exception &e)
+    else
     {
-        MAS_LOG_WARN("Failed to load config, using defaults: {}", e.what());
+        detect_color_ = EnemyColor::RED;
     }
+    // 读取灯条与配板参数
+    min_lightbar_ratio_    = lights_params["min_lightbar_ratio"].as<double>(0.1);
+    max_lightbar_ratio_    = lights_params["max_lightbar_ratio"].as<double>(0.5);
+    min_lightbar_length_   = lights_params["min_lightbar_length"].as<double>(8.0);
+    max_angle_error_       = lights_params["max_angle_error"].as<double>(20.0) / 57.3; // rad
+    max_lightbar_area_     = lights_params["max_lightbar_area"].as<double>(10000.0);
+    min_armor_ratio_       = armors_params["min_armor_ratio"].as<double>(0.7);
+    max_armor_ratio_       = armors_params["max_armor_ratio"].as<double>(0.8);
+    max_side_ratio_        = armors_params["max_side_ratio"].as<double>(3.2);
+    max_rectangular_error_ = armors_params["max_rectangular_error"].as<double>(3.2) * CV_PI / 180.0; // deg -> rad
+
+    // 模型与标签路径必须显式填写，不再使用旧工程的默认路径。
+    const auto model_path = number_params["model_path"].as<std::string>();
+    const auto label_path = number_params["label_path"].as<std::string>();
+    const auto confidence = number_params["classifier_threshold"].as<double>(0.7);
+
+    std::vector<std::string> ignore_classes;
+    if (number_params["ignore_classes"])
+    {
+        for (const auto &cls : number_params["ignore_classes"])
+            ignore_classes.push_back(cls.as<std::string>());
+    }
+    classifier = std::make_unique<NumberClassifier>(
+        (std::filesystem::path(config_path).parent_path() / model_path).string(),
+        (std::filesystem::path(config_path).parent_path() / label_path).string(), confidence, ignore_classes);
 }
 
 std::vector<Armor> ArmorDetector::ArmorDetect(const cv::Mat &bgr_img) noexcept
@@ -127,6 +101,8 @@ std::vector<Armor> ArmorDetector::ArmorDetect(const cv::Mat &bgr_img) noexcept
     if (bgr_img.empty() || bgr_img.cols <= 0 || bgr_img.rows <= 0)
     {
         MAS_LOG_WARN("Invalid input image");
+        lights_.clear();
+        armors_.clear();
         return armors_;
     }
 
@@ -202,62 +178,9 @@ std::vector<LightBar> ArmorDetector::findLights(const cv::Mat &bin_img, const cv
             continue;
         }
 
-        // 颜色识别：在灯条区域内采样，避免单条中心线被反光或运动模糊误判
-        if (!src_img.empty() && src_img.channels() == 3)
-        {
-            const int      cols      = src_img.cols;
-            const int      rows      = src_img.rows;
-            const uint8_t *pixel_ptr = src_img.data;
-            const size_t   stride    = src_img.step;
-            const bool     is_red    = (detect_color_ == EnemyColor::RED);
-
-            constexpr int  N_LENGTH_SAMPLES = 10;
-            constexpr int  N_WIDTH_SAMPLES  = 5;
-            cv::Point2f    axis             = lightbar.bottom - lightbar.top;
-            const float    axis_length      = cv::norm(axis);
-
-            if (axis_length < 1e-3f)
-            {
-                continue;
-            }
-
-            axis *= 1.0f / axis_length;
-            const cv::Point2f perpendicular(-axis.y, axis.x); // axis 的垂直方向单位向量
-            int               diff_sum    = 0;
-            int               valid_count = 0;
-
-            for (int i = 1; i < N_LENGTH_SAMPLES; i++)
-            {
-                const float length_ratio = static_cast<float>(i) / N_LENGTH_SAMPLES;
-                const cv::Point2f center = lightbar.top + (lightbar.bottom - lightbar.top) * length_ratio;
-                for (int j = 0; j < N_WIDTH_SAMPLES; ++j)
-                {
-                    // 覆盖灯条核心及两侧光晕，避免只采到过曝白芯。
-                    const float width_ratio = (static_cast<float>(j) - 2.0f) / 2.0f;
-                    const cv::Point2f pt = center + perpendicular * static_cast<float>(lightbar.width * width_ratio * 0.75);
-                    const int px = static_cast<int>(pt.x);
-                    const int py = static_cast<int>(pt.y);
-                    if (px < 0 || px >= cols || py < 0 || py >= rows) continue;
-
-                    const uint8_t *pixel = pixel_ptr + py * stride + px * 3;
-                    const int brightness = std::max({static_cast<int>(pixel[0]), static_cast<int>(pixel[1]), static_cast<int>(pixel[2])});
-                    const int color_diff = is_red ? (pixel[2] - pixel[0]) : (pixel[0] - pixel[2]);
-                    // 暗部噪声和白色饱和点都不携带可靠红蓝信息。
-                    if (brightness < 40 || (color_diff >= -TARGET_COLOR_MARGIN && color_diff <= TARGET_COLOR_MARGIN)) continue;
-                    diff_sum += color_diff;
-                    valid_count++;
-                }
-            }
-
-            const ColorMatch color_match = classifyTargetColor(diff_sum, valid_count);
-            if (color_match == ColorMatch::OPPOSITE)
-            {
-                continue;
-            }
-            
-            lightbar.target_color_confirmed = color_match == ColorMatch::TARGET;
-            lightbar.color = is_red ? EnemyColor::RED : EnemyColor::BLUE;
-        }
+        // 在灯条区域内采样判色，允许中性灯条参与后续配板。
+        if (!filterLightColor(lightbar, src_img))
+            continue;
 
         lightbars.emplace_back(lightbar);
     }
@@ -266,6 +189,67 @@ std::vector<LightBar> ArmorDetector::findLights(const cv::Mat &bin_img, const cv
     std::sort(lightbars.begin(), lightbars.end(), [](const LightBar &a, const LightBar &b) { return a.center.x < b.center.x; });
 
     return lightbars;
+}
+
+// 沿灯条长宽方向采样并填写颜色；中性灯条保留，异色或退化灯条拒绝。
+bool ArmorDetector::filterLightColor(LightBar &lightbar, const cv::Mat &src_img) const
+{
+    if (src_img.empty() || src_img.channels() != 3)
+        return true;
+
+    const int      cols      = src_img.cols;
+    const int      rows      = src_img.rows;
+    const uint8_t *pixel_ptr = src_img.data;
+    const size_t   stride    = src_img.step;
+    const bool     is_red    = (detect_color_ == EnemyColor::RED);
+
+    constexpr int  N_LENGTH_SAMPLES = 10;
+    constexpr int  N_WIDTH_SAMPLES  = 5;
+    cv::Point2f    axis             = lightbar.bottom - lightbar.top;
+    const float    axis_length      = cv::norm(axis);
+
+    if (axis_length < 1e-3f)
+    {
+        return false;
+    }
+
+    axis *= 1.0f / axis_length;
+    const cv::Point2f perpendicular(-axis.y, axis.x); // axis 的垂直方向单位向量
+    int               diff_sum    = 0;
+    int               valid_count = 0;
+
+    for (int i = 1; i < N_LENGTH_SAMPLES; i++)
+    {
+        const float length_ratio = static_cast<float>(i) / N_LENGTH_SAMPLES;
+        const cv::Point2f center = lightbar.top + (lightbar.bottom - lightbar.top) * length_ratio;
+        for (int j = 0; j < N_WIDTH_SAMPLES; ++j)
+        {
+            // 覆盖灯条核心及两侧光晕，避免只采到过曝白芯。
+            const float width_ratio = (static_cast<float>(j) - 2.0f) / 2.0f;
+            const cv::Point2f pt = center + perpendicular * static_cast<float>(lightbar.width * width_ratio * 0.75);
+            const int px = static_cast<int>(pt.x);
+            const int py = static_cast<int>(pt.y);
+            if (px < 0 || px >= cols || py < 0 || py >= rows) continue;
+
+            const uint8_t *pixel = pixel_ptr + py * stride + px * 3;
+            const int brightness = std::max({static_cast<int>(pixel[0]), static_cast<int>(pixel[1]), static_cast<int>(pixel[2])});
+            const int color_diff = is_red ? (pixel[2] - pixel[0]) : (pixel[0] - pixel[2]);
+            // 暗部噪声和白色饱和点都不携带可靠红蓝信息。
+            if (brightness < 40 || (color_diff >= -TARGET_COLOR_MARGIN && color_diff <= TARGET_COLOR_MARGIN)) continue;
+            diff_sum += color_diff;
+            valid_count++;
+        }
+    }
+
+    const ColorMatch color_match = classifyTargetColor(diff_sum, valid_count);
+    if (color_match == ColorMatch::OPPOSITE)
+    {
+        return false;
+    }
+
+    lightbar.color_confirmed = color_match == ColorMatch::TARGET;
+    lightbar.color = is_red ? EnemyColor::RED : EnemyColor::BLUE;
+    return true;
 }
 
 std::vector<Armor> ArmorDetector::findArmors(const std::vector<LightBar> &lights, const cv::Mat &src_img) noexcept
@@ -280,15 +264,15 @@ std::vector<Armor> ArmorDetector::findArmors(const std::vector<LightBar> &lights
         {
             if (left->color != right->color) continue;
             // 中性灯条可以补全一根过曝灯条，但两根都无法确认颜色时不能组成装甲板。
-            if (!left->target_color_confirmed && !right->target_color_confirmed)
+            if (!left->color_confirmed && !right->color_confirmed)
             {
                 continue;
             }
             auto armor = Armor(*left, *right);
 
-            const bool contain_light = containLight(left - lights.begin(), right - lights.begin(), lights);
-            const bool reject_ratio  = armor.ratio < min_armor_ratio_ || armor.ratio > max_armor_ratio_;
-            const bool reject_side_ratio = armor.side_ratio > max_side_ratio_;
+            const bool contain_light            = containLight(left - lights.begin(), right - lights.begin(), lights);
+            const bool reject_ratio             = armor.ratio < min_armor_ratio_ || armor.ratio > max_armor_ratio_;
+            const bool reject_side_ratio        = armor.side_ratio > max_side_ratio_;
             const bool reject_rectangular_error = armor.rectangular_error > max_rectangular_error_;
             // 几何特征判断
             if (contain_light || reject_ratio || reject_side_ratio || reject_rectangular_error)

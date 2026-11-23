@@ -1,28 +1,62 @@
-# 统一显示出口
+# 公共显示模块
 
-自有 SDL/Rerun 适配代码集中在本目录，第三方 Rerun SDK 保留在 third_party/rerun/sdk。SDL2 使用 Linux 系统 libsdl2-dev。
+业务模块准备图像和图元，Display 选择后端并控制采样。显示层不解释 armor、buff 或 detect/track/shoot 的业务含义。
 
-- display.hpp/.cpp：公开图元、会话生命周期、后端路由和图像采样。应用继续调用 Display。set_time选定本帧图像后，领域Debug通过image_due()在生成图元前判断是否绘制；values_enabled()只在Rerun会话中为true，SDL跳过曲线数据整理。
-- sdl/sdl_display.hpp/.cpp：轻量图像/图元任务、最新任务槽、文字纹理缓存、SDL窗口和事件。纹理上传、缩放和实际绘制在入口主线程执行。
-- rerun/rerun_display.hpp/.cpp：Viewer、SDK、共享底图、状态区编码、数值与RRD录制。由Display串行调用，不另建调试线程。
+| 文件 | 职责 |
+|---|---|
+| `display.hpp/.cpp` | 公共图元、会话、布局切换、图像采样和后端分派 |
+| `sdl/sdl_display.hpp/.cpp` | 最新帧任务、独立窗口、事件、纹理和文字缓存 |
+| `rerun/rerun_display.hpp/.cpp` | Viewer、底图、图元、HUD、曲线和 RRD |
+| `CMakeLists.txt` | 登记 `buff_display` 及其直接依赖 |
 
-实机直接调用Display::start(config_path, output)，只读取并准备公共display配置。领域Debug内部按模块开关调用register_layout，router通过select_layout选择领域名，主线程poll确认该领域有非空视图后才创建后端；全关debug时不初始化SDL、Viewer或RRD会话。回放仍可传入调整后的settings节点立即启动。DisplayView描述通用窗口名称和可选HUD高度，显示层不解析detect/track/shoot开关。领域布局及生成脚本位于auto_buff/debug/blueprints和auto_aim/debug/blueprints，分别嵌入领域debug目标；运行时不依赖Python。
+## 启动与关闭
 
-语义图元分别由auto_buff/debug/visualize和auto_aim/debug/visualize在算法内部准备。领域Debug不持有异步工作线程，也不复制整帧图像；SDL在采样后保存只读cv::Mat引用及按值图元，同一帧的三个窗口共享底图存储。海康相机池检测引用计数，待显示图像仍被持有时使用其他存储，避免覆盖。其他调用方同样不能原地改写已提交的存储。
+实机调用 `start(config_path, output)` 只保存配置。领域 Debug 按 YAML 开关注册布局，router 选择领域，主线程 `poll()` 看到非空布局后才初始化选定后端。全关 debug 时不创建 SDL、Viewer 或 RRD 会话。
 
-SDL 为 detect/track/shoot 分别创建独立窗口，各自具有渲染器与纹理；禁用模块不创建窗口，单个关闭后不会被新帧重新打开。SDL只显示本机实时画面，不创建Rerun对象、不提交SDK数据、不写RRD；spawn、address、recording、image_encoding和hud_encoding均为Rerun专用配置，SDL不解析。
-Rerun独立管理Viewer、远程连接、图像、曲线和RRD；它不创建SDL窗口。三个视图共享 camera/image，文字与图元放在各自的 detect/image、track/image、shoot/image 子树。HUD 仅编码状态区，不编码整幅透明图。
-现有 image_encoding: jpeg/bgr、hud_encoding: png/bgra 用于 Rerun 对照；SDL 忽略它们。
+回放、采集可调用 `start(settings, config_path, output)` 立即创建会话。两个后端整局互斥：SDL 不构造 Rerun 对象，Rerun 不创建 SDL 窗口。
 
-Rerun图像按最高60 Hz采样；SDL按最高30 Hz在提交前采样，不复制、不绘制被跳过的图像。仅Rerun逐算法帧记录数值曲线，图像采样不影响曲线频率；SDL暂停回放后的单步绕过图像采样，保证显示刚处理的帧。主线程取走最新一组任务后释放提交锁，再执行SDL绘制，落后时待显示任务整组替换。Process FPS继续统计算法调用吞吐，不代表窗口刷新率。
-start/poll/shutdown由主线程调用。领域注册与选择只同步布局描述，主线程poll才创建后端、应用布局及操作窗口。算法任务先退出，main等待全部任务，再调用Display::shutdown。Viewer暂停不阻塞算法，关闭SDL窗口也不停止串口。启动Viewer时不持提交锁，算法线程可继续处理。
+`start/poll/shutdown` 由主线程调用。退出时先停止算法提交者并等待任务结束，再关闭显示。关闭单个 SDL 窗口不停止业务，也不会被后续帧重新打开；Viewer 暂停仅影响观看。
 
-修改 Rerun 布局时，用安装了 rerun-sdk==0.41.0 的 Python 运行 `python auto_buff/debug/blueprints/generate.py`，随后重新编译。普通使用无需重新生成。
+## 一帧提交
 
-显示目标是buff_display，直接链接图像能力、yaml-cpp、SDL2和Rerun SDK，不链接buff_io。算法模块通过自己的Debug子类使用此目标；两个后端运行时互斥，完整程序仍链接SDL2和Rerun/Arrow，选择SDL不等于编译时删除Rerun。Plotter是独立UDP诊断出口，不依赖Display或图像debug开关。
+算法线程持有 `frame_mutex()` 后依次调用：
 
-display_add保留MAS原有width/height参数；SDL窗口初始按width等比设置大小，底图由SDL纹理缩放，图元使用原图坐标；height不参与计算，Rerun记录原图并忽略这两个呈现尺寸。
+```text
+set_time(曝光/媒体时间)
+    → image_due()：决定是否整理图像和图元
+    → values_enabled()：决定是否整理曲线
+    → 提交图像、图元、数值
+    → end_frame()
+```
 
-SDL 按 windowID 路由关闭事件；关闭一个不影响其余窗口。窗口初始位置错开，可分别拖动缩放。图像保留最新帧，不再横向拼接。回放按键在任一模块窗口生效；Rerun 保持现有单 Viewer 的分视图布局。
+图像采样不影响算法、采集、串口或处理 FPS。SDL 上限 30 Hz，Rerun 图像上限 60 Hz；数值曲线仍逐算法帧记录。SDL 回放暂停后的单步绕过采样，显示刚处理的帧。
 
-SDL点线直接由渲染器绘制；文字使用现有OpenCV生成透明纹理，每窗口缓存最近50种内容/字号/颜色/粗细组合，位置变化复用纹理，不依赖SDL_ttf或外部字体文件。窗口析构统一释放底图与文字纹理。
+SDL 提交只保留只读 `cv::Mat` 引用和按值图元，不缩放、不叠图。同一帧可由多个窗口共享底图。提交者不得覆盖仍由显示持有的存储；海康相机池通过引用计数避免复用。
+
+`end_frame()` 整组发布最新帧，覆盖尚未显示的旧任务。主线程取走任务后释放锁，再上传纹理和绘制。
+
+## SDL
+
+- 每个启用视图对应一个可独立拖动、缩放和关闭的窗口，关闭事件按 windowID 路由。
+- 窗口初始按 `width` 等比显示，图元使用原图坐标；`height` 参数仅保留兼容。
+- 点线直接使用 SDL 绘制；文字由 OpenCV 生成透明纹理，每窗口缓存最近 50 种内容和样式，不依赖 SDL_ttf。
+- 硬件渲染器优先使用原生 BGR24；只支持 BGRA32 时，同次 `poll()` 的同源窗口共享一次颜色转换。软件渲染保留 BGR24 路径。
+- 同源按地址、尺寸和步长判断。每次 `poll()` 清除源图标识，只复用已分配缓冲，避免相机复用地址后显示旧帧。
+
+`spawn/address/recording/image_encoding/hud_encoding` 仅用于 Rerun，SDL 不解析这些配置，也不写 RRD。
+
+## Rerun
+
+有领域布局时，视图共享 `camera/image`；各自图元和 HUD 位于 `<视图名>/image` 下。独立预览使用各自底图路径。`DisplayView::hud_height` 提供状态区高度，显示层不猜测业务名称。
+
+`image_encoding` 支持 `jpeg/bgr`，`hud_encoding` 支持 `png/bgra`。底图、图元、HUD 分开提交，HUD 使用状态区高度。图元即使为空也提交，清除上一帧观测。
+
+`scalar()` 的 NaN/Inf 记录非递归 `Clear::FLAT`，清除当前路径并保留历史；后续有限值恢复曲线。`point3d()` 的非有限坐标记录空点集。SDL 不处理这些数值接口。
+
+领域布局位于 `auto_aim/debug/blueprints`、`auto_buff/debug/blueprints`。修改布局后，使用安装了 `rerun-sdk==0.41.0` 的 Python 运行对应 `generate.py`，再重新编译；普通运行不需要 Python 生成布局。
+
+## 构建与验证
+
+`buff_display` 显式依赖 OpenCV、日志、yaml-cpp、SDL2 和 Rerun SDK，不依赖 `buff_io`。SDK 位于 `third_party/rerun/sdk`；SDL2 使用 Linux 系统 `libsdl2-dev`。运行时选择 SDL 仍会链接 Rerun/Arrow，未做编译期裁剪。
+
+现有显示测试覆盖独立窗口、资源生命周期、采样、暂停单步、按键及曲线清理。`tools/sdl_upload_profile.cpp` 独立比较 BGR24/共享 BGRA32 的转换、上传和绘制成本，不给实机增加统计开关。Windows 软件渲染结果不能代替目标 Linux/OpenGL 和 NoMachine 环境实测。

@@ -23,6 +23,7 @@ ArmorShoot::ArmorShoot(const std::string &config_path)
         auto       node       = config["auto_aim"]["armor_shoot"];
         yaw_offset_           = node["yaw_offset"].as<double>(0.0) / 57.3;
         pitch_offset_         = node["pitch_offset"].as<double>(0.0) / 57.3;
+        max_pitch_            = node["max_pitch"].as<double>(40.0) / 57.3;
         fire_delay_time_      = node["fire_delay_time"].as<double>(0.02);
         yaw_tolerance_near_   = node["yaw_tolerance_near"].as<double>(2.0) / 57.3;
         yaw_tolerance_far_    = node["yaw_tolerance_far"].as<double>(1.0) / 57.3;
@@ -31,10 +32,13 @@ ArmorShoot::ArmorShoot(const std::string &config_path)
         bullet_speed_         = node["bullet_speed"].as<double>(25.0);
         gravity_              = node["gravity"].as<double>(9.81);
         air_resistance_       = node["resistance"].as<double>(0.003);
+
         shoot_debug_.set_enabled(node["debug"].as<bool>(false));
+
         // plotter 配置
         plotter_enable_ = node["plotter_enable"].as<bool>(false);
-        if (plotter_enable_) plotter_ = std::make_unique<rm_utils::Plotter>();
+        if (plotter_enable_)
+            plotter_ = std::make_unique<rm_utils::Plotter>();
 
         MAS_LOG_INFO("armor_shoot yaml loaded successfully");
     }
@@ -48,20 +52,23 @@ ArmorShoot::~ArmorShoot() = default;
 
 void ArmorShoot::reset()
 {
-    lock_id_ = -1;
+    lock_id_         = -1;
     last_target_yaw_ = last_target_pitch_ = 0;
-    debug_aim_point = {false, Eigen::Vector4d::Zero(), false, -1, AimMode::TRACK};
+    debug_aim_point  = {false, Eigen::Vector4d::Zero(), false, -1, AimMode::TRACK};
 }
 
 SendPacket ArmorShoot::shoot(const std::optional<Target> &target, std::chrono::steady_clock::time_point timestamp,
-                             const Eigen::Matrix3d &R_gimbal2world, std::chrono::steady_clock::time_point processing_time,
-                             const cv::Mat &bgr_img)
+                            const Eigen::Matrix3d &R_gimbal2world, std::chrono::steady_clock::time_point processing_time,
+                            const cv::Mat &bgr_img)
 {
     debug_aim_point = {false, Eigen::Vector4d::Zero(), false, -1, AimMode::TRACK};
-    const auto finish = [&](SendPacket value) {
+
+    const auto finish = [&](SendPacket value)
+    {
         shoot_debug_.draw(bgr_img, target, value, debug_aim_point, R_gimbal2world);
         return value;
     };
+
     // 从旋转矩阵提取云台欧拉角（yaw, pitch）
     Eigen::Vector3d gimbal_euler = rm_utils::eulers(R_gimbal2world, 2, 1, 0);
     double          gimbal_yaw   = gimbal_euler[0];
@@ -70,7 +77,6 @@ SendPacket ArmorShoot::shoot(const std::optional<Target> &target, std::chrono::s
     // 无目标情况处理
     if (!target.has_value())
     {
-
         return finish({false, last_target_yaw_, last_target_pitch_, 0});
     }
 
@@ -87,7 +93,7 @@ SendPacket ArmorShoot::shoot(const std::optional<Target> &target, std::chrono::s
 
     // 选择初始瞄准点
     const double d0 = std::hypot(x[0], x[2]);
-    rm_utils::Trajectory trajectory0(bullet_speed_, d0, x[4], gravity_, air_resistance_);
+    rm_utils::Trajectory trajectory0(bullet_speed_, d0, x[4], gravity_, air_resistance_, max_pitch_);
 
     if (trajectory0.unsolvable)
     {
@@ -96,13 +102,14 @@ SendPacket ArmorShoot::shoot(const std::optional<Target> &target, std::chrono::s
         return finish({true, last_target_yaw_, last_target_pitch_, 0});
     }
 
-// 迭代求解飞行时间 (最多 10 次，收敛条件：相邻两次 fly_time 差 < 0.001)
-    bool                converged     = false;
-    double              prev_fly_time = trajectory0.fly_time;
+    // 迭代求解飞行时间 (最多 10 次，收敛条件：相邻两次 fly_time 差 < 0.001)
+    bool   converged     = false;
+    double prev_fly_time = trajectory0.fly_time;
 
     for (int iter = 0; iter < 10; ++iter)
     {
         Target iteration_target = *target;
+
         // 预测目标在 future + prev_fly_time 时刻的位置
         auto predict_time = future + std::chrono::microseconds(static_cast<int>(prev_fly_time * 1e6));
         iteration_target.predict(predict_time);
@@ -113,14 +120,13 @@ SendPacket ArmorShoot::shoot(const std::optional<Target> &target, std::chrono::s
 
         if (!aim_point_iter.valid)
         {
-
             return finish({true, last_target_yaw_, last_target_pitch_, 0});
         }
 
         // 计算新弹道
-        Eigen::Vector3d      xyz = aim_point_iter.xyza.head(3);
-        double               d   = std::sqrt(xyz.x() * xyz.x() + xyz.y() * xyz.y());
-        rm_utils::Trajectory current_traj(bullet_speed_, d, xyz.z(), gravity_, air_resistance_);
+        Eigen::Vector3d xyz = aim_point_iter.xyza.head(3);
+        double d            = std::sqrt(xyz.x() * xyz.x() + xyz.y() * xyz.y());
+        rm_utils::Trajectory current_traj(bullet_speed_, d, xyz.z(), gravity_, air_resistance_, max_pitch_);
 
         // 检查弹道是否可解
         if (current_traj.unsolvable)
@@ -137,27 +143,34 @@ SendPacket ArmorShoot::shoot(const std::optional<Target> &target, std::chrono::s
             converged = true;
             break;
         }
+
         prev_fly_time = current_traj.fly_time;
     }
 
     // 计算最终角度
     Eigen::Vector3d final_xyz = debug_aim_point.xyza.head(3);
     double          yaw_raw   = std::atan2(final_xyz.y(), final_xyz.x()) + yaw_offset_;
+
     // 初始化：如果是第一次运行，或者相差太离谱，用当前云台角度初始化基准，这里的 3.0 (弧度) 是一个阈值，约 171 度，防止刚启动时转一大圈
-    if (std::abs(last_target_yaw_ - gimbal_yaw) > 3.0) {
+    if (std::abs(last_target_yaw_ - gimbal_yaw) > 3.0)
+    {
         last_target_yaw_ = gimbal_yaw;
     }
+
     // 计算原始目标角度与上一次目标角度的差值
     double yaw_delta = yaw_raw - last_target_yaw_;
+
     // 将差值归一化到 [-π, π] 范围内
     yaw_delta = rm_utils::limit_rad(yaw_delta);
+
     // 基于上一次目标角度 + 归一化差值，得到连续的目标角度
     double yaw = last_target_yaw_ + yaw_delta;
+
     // 更新状态变量
     last_target_yaw_ = yaw;
 
-    double pitch = -(rm_utils::Trajectory(bullet_speed_, final_xyz.head<2>().norm(), 
-                                            final_xyz.z(), gravity_, air_resistance_).pitch + pitch_offset_);
+    double pitch = -(rm_utils::Trajectory(bullet_speed_, final_xyz.head<2>().norm(), final_xyz.z(),
+                                         gravity_, air_resistance_).pitch + pitch_offset_);
 
     float dist = static_cast<float>(final_xyz.head<2>().norm());
 
@@ -170,7 +183,9 @@ SendPacket ArmorShoot::shoot(const std::optional<Target> &target, std::chrono::s
     {
         bool yaw_ok   = std::abs(rm_utils::limit_rad(gimbal_yaw - yaw)) < yaw_tolerance;
         bool pitch_ok = std::abs(gimbal_pitch - pitch) < pitch_tolerance;
-        if (yaw_ok && pitch_ok) fire = 1;
+
+        if (yaw_ok && pitch_ok)
+            fire = 1;
     }
 
     // Plotter 输出
@@ -191,6 +206,7 @@ SendPacket ArmorShoot::shoot(const std::optional<Target> &target, std::chrono::s
 
         // 距离信息
         data["distance"] = dist;
+
         // aim point
         data["aim_point"]["x"] = final_xyz.x();
         data["aim_point"]["y"] = final_xyz.y();
@@ -206,8 +222,8 @@ SendPacket ArmorShoot::shoot(const std::optional<Target> &target, std::chrono::s
     result.target_yaw   = yaw;
     result.target_pitch = pitch;
 
-    last_target_pitch_ = pitch; 
-    last_target_yaw_   = yaw;   
+    last_target_pitch_ = pitch;
+    last_target_yaw_   = yaw;
 
     return finish(result);
 }
@@ -231,8 +247,9 @@ AimPoint ArmorShoot::chooseAimPoint(const Target &target)
         MAS_LOG_DEBUG("Invalid lock_id_ {} reset to -1 (armor_num: {})", lock_id_, armors.size());
         lock_id_ = -1;
     }
+
     // 默认打击装甲板：列表中的第一个装甲板
-    int             default_id    = 0;
+    int             default_id   = 0;
     Eigen::Vector4d default_point = armors[0];
 
     // 初始状态或未跳变：直接打击默认装甲板
@@ -251,13 +268,14 @@ AimPoint ArmorShoot::chooseAimPoint(const Target &target)
     // 决策逻辑
 
     // 高速旋转模式下采用CENTER模式
-    if (omega >= spinning_threshold_high_ )
+    if (omega >= spinning_threshold_high_)
     {
         // M0/M2 共用 x[4] 高度；CENTER 模式不依赖 lock_id_
         const double h = x[4];
+
         // yaw 固定瞄准旋转中心，pitch 固定瞄准 M0/M2 高度
         Eigen::Vector4d center_point(x[0], x[2], h, center_yaw);
-        const double dist = std::hypot(x[0], x[2]);
+        const double   dist = std::hypot(x[0], x[2]);
 
         // 设定近距离阈值和远距离阈值，单位：度
         constexpr double angle_near = 60.0; // 近距离窗口
@@ -272,11 +290,11 @@ AimPoint ArmorShoot::chooseAimPoint(const Target &target)
         {
             fire_window_angle_deg = angle_near;
         }
-        else if(dist <= dist_far)
+        else if (dist <= dist_far)
         {
             // 3～5 m 从 60°线性减小到20°
             const double ratio    = (dist - dist_set) / (dist_far - dist_set);
-            fire_window_angle_deg = angle_near + ratio * (angle_far - angle_near);        
+            fire_window_angle_deg = angle_near + ratio * (angle_far - angle_near);
         }
         else
         {
@@ -290,7 +308,7 @@ AimPoint ArmorShoot::chooseAimPoint(const Target &target)
         bool fire_allowed = false;
 
         // 只检查偶数高度组：M0、M2
-        for (int id = 0; id < static_cast<int>(armors.size()); id += 2)        
+        for (int id = 0; id < static_cast<int>(armors.size()); id += 2)
         {
             // delta_angles[i] 是预测时刻装甲板相对于中心的角度差
             if (std::abs(delta_angles[id]) < fire_window_angle)
@@ -303,12 +321,14 @@ AimPoint ArmorShoot::chooseAimPoint(const Target &target)
         lock_id_ = -1; // 中心瞄准模式不锁定特定装甲板
         return {true, center_point, fire_allowed, -1, AimMode::CENTER};
     }
+
     // 跟踪模式,角速度低于低阈值（近似静止或低速旋转）锁定并跟踪可见装甲板
     else if (omega <= spinning_threshold_low_)
     {
         // 筛选视野内的装甲板（±60 度范围内）
         constexpr double VISIBLE_ANGLE_THRESHOLD = 60.0 / 57.3;
         std::vector<int> visible_ids;
+
         for (size_t i = 0; i < armors.size(); ++i)
         {
             if (std::abs(delta_angles[i]) < VISIBLE_ANGLE_THRESHOLD)
@@ -326,6 +346,7 @@ AimPoint ArmorShoot::chooseAimPoint(const Target &target)
             {
                 int id0 = visible_ids[0];
                 int id1 = visible_ids[1];
+
                 if (lock_id_ != id0 && lock_id_ != id1)
                 {
                     // 选择夹角更小的装甲板
@@ -340,11 +361,13 @@ AimPoint ArmorShoot::chooseAimPoint(const Target &target)
                     lock_id_ = visible_ids[0];
                 }
             }
+
             selected_id = lock_id_;
         }
 
         // 默认打击装甲板：没找到视野内的，直接用默认的
-        if (selected_id == -1) selected_id = default_id;
+        if (selected_id == -1)
+            selected_id = default_id;
 
         return {true, armors[selected_id], true, selected_id, AimMode::TRACK};
     }
@@ -359,12 +382,15 @@ AimPoint ArmorShoot::chooseAimPoint(const Target &target)
         // 尝试寻找"正在靠近"的板
         for (size_t i = 0; i < armors.size(); ++i)
         {
-            if (std::abs(delta_angles[i]) > coming_ang) continue;
+            if (std::abs(delta_angles[i]) > coming_ang)
+                continue;
+
             if (x[7] > 0 && delta_angles[i] < leaving_ang)
             {
                 selected_id = i;
                 break;
             }
+
             if (x[7] < 0 && delta_angles[i] > -leaving_ang)
             {
                 selected_id = i;
@@ -378,6 +404,7 @@ AimPoint ArmorShoot::chooseAimPoint(const Target &target)
             // 如果没有找到"正在靠近"的板，检查是否有视野内的板
             constexpr double VISIBLE_ANGLE_THRESHOLD = 60.0 / 57.3;
             std::vector<int> visible_ids;
+
             for (size_t i = 0; i < armors.size(); ++i)
             {
                 if (std::abs(delta_angles[i]) < VISIBLE_ANGLE_THRESHOLD)
@@ -396,6 +423,7 @@ AimPoint ArmorShoot::chooseAimPoint(const Target &target)
                 // 选择夹角最小的
                 int    best_id   = visible_ids[0];
                 double min_angle = std::abs(delta_angles[best_id]);
+
                 for (int id : visible_ids)
                 {
                     double angle = std::abs(delta_angles[id]);
@@ -405,6 +433,7 @@ AimPoint ArmorShoot::chooseAimPoint(const Target &target)
                         best_id   = id;
                     }
                 }
+
                 selected_id = best_id;
             }
             else

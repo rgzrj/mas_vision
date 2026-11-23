@@ -49,12 +49,12 @@
 | [auto_buff/buff_detect/traditional/rmcs/rune.hpp](../auto_buff/buff_detect/traditional/rmcs/rune.hpp) | buff_detect（RMCS 适配） | 声明传统 RuneDetector、参数及轮廓/R骨架检测所需结构。 |
 | [auto_buff/buff_detect/traditional/traditional.cpp](../auto_buff/buff_detect/traditional/traditional.cpp) | buff_detect | 加载用于物理尺寸筛选的相机参数，把 RMCS 传统检测输出转为公共 Detection；不调用跟踪。 |
 | [auto_buff/buff_detect/traditional/traditional.hpp](../auto_buff/buff_detect/traditional/traditional.hpp) | buff_detect | 声明传统检测适配器 TraditionalDetector。 |
-| [auto_buff/buff_detect/yolo/pixel_geometry.cpp](../auto_buff/buff_detect/yolo/pixel_geometry.cpp) | buff_detect | 以网络点作搜索先验，提取并筛选真实像素轮廓、测量颜色；颜色判定与按已知颜色提轮廓是不同操作。 |
-| [auto_buff/buff_detect/yolo/pixel_geometry.hpp](../auto_buff/buff_detect/yolo/pixel_geometry.hpp) | buff_detect | 声明红蓝颜色采样、ROI 色差轮廓、板面轮廓选择和灯臂轮廓提取接口。 |
-| [auto_buff/buff_detect/yolo/pixel_refiner.cpp](../auto_buff/buff_detect/yolo/pixel_refiner.cpp) | buff_detect | 利用实测轴线/轮廓修正板心和端点，按整组精修或回退；不靠对称关系凭空补缺失端点，不修改网络类别。 |
-| [auto_buff/buff_detect/yolo/pixel_refiner.hpp](../auto_buff/buff_detect/yolo/pixel_refiner.hpp) | buff_detect | 声明板面与网络五点的像素精修接口及成功/回退约定。 |
-| [auto_buff/buff_detect/yolo/pose_output.cpp](../auto_buff/buff_detect/yolo/pose_output.cpp) | buff_detect | 执行类别/点分数门限、原图坐标还原、分组去重及三类观测转换；保留 raw_poses，按需调用像素处理。 |
-| [auto_buff/buff_detect/yolo/pose_output.hpp](../auto_buff/buff_detect/yolo/pose_output.hpp) | buff_detect | 声明三类五点输出解码、四端点收集和公共观测生成接口。 |
+| [auto_buff/buff_detect/yolo/pixels/pixel_geometry.cpp](../auto_buff/buff_detect/yolo/pixels/pixel_geometry.cpp) | buff_detect | 以网络点作搜索先验，提取并筛选真实像素轮廓、测量颜色；颜色判定与按已知颜色提轮廓是不同操作。 |
+| [auto_buff/buff_detect/yolo/pixels/pixel_geometry.hpp](../auto_buff/buff_detect/yolo/pixels/pixel_geometry.hpp) | buff_detect | 声明红蓝颜色采样、ROI 色差轮廓、板面轮廓选择和灯臂轮廓提取接口。 |
+| [auto_buff/buff_detect/yolo/pixels/pixel_refiner.cpp](../auto_buff/buff_detect/yolo/pixels/pixel_refiner.cpp) | buff_detect | 利用实测轴线/轮廓修正板心和端点，按整组精修或回退；不靠对称关系凭空补缺失端点，不修改网络类别。 |
+| [auto_buff/buff_detect/yolo/pixels/pixel_refiner.hpp](../auto_buff/buff_detect/yolo/pixels/pixel_refiner.hpp) | buff_detect | 声明板面与网络五点的像素精修接口及成功/回退约定。 |
+| [auto_buff/buff_detect/yolo/observation/pose_output.cpp](../auto_buff/buff_detect/yolo/observation/pose_output.cpp) | buff_detect | 执行类别/点分数门限、原图坐标还原、分组去重及三类观测转换；保留 raw_poses，按需调用像素处理。 |
+| [auto_buff/buff_detect/yolo/observation/pose_output.hpp](../auto_buff/buff_detect/yolo/observation/pose_output.hpp) | buff_detect | 声明三类五点输出解码、四端点收集和公共观测生成接口。 |
 | [auto_buff/buff_detect/yolo/yolo.cpp](../auto_buff/buff_detect/yolo/yolo.cpp) | buff_detect | 加载 ONNX/IR，配置 CPU 推理；完成 letterbox/RGB/NCHW/归一化、推理、解码与观测适配，记录分阶段耗时。 |
 | [auto_buff/buff_detect/yolo/yolo.hpp](../auto_buff/buff_detect/yolo/yolo.hpp) | buff_detect | 声明 OpenVINO YoloDetector、推理资源与可配置项。 |
 
@@ -252,11 +252,11 @@
 
 | 文件 | 所属目标／使用状态 | 实际职责 |
 | --- | --- | --- |
-| [tests/app/buff_debug_test.cpp](../tests/app/buff_debug_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 异步诊断快照所有权、源缓冲复用、离线保序与收尾检查。 |
-| [tests/app/display_test.cpp](../tests/app/display_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 显示适配、叠图与 RRD 等诊断输出行为检查。 |
-| [tests/app/playback_control_test.cpp](../tests/app/playback_control_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 暂停/继续/单步/退出状态机检查。 |
-| [tests/app/replay_test.cpp](../tests/app/replay_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 成对录制/回放/检查流程、时间与姿态缺失等回归。 |
-| [tests/app/sdl_display_test.cpp](../tests/app/sdl_display_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | SDL dummy/software 环境检查三个独立窗口、图像内容、关窗与控制键行为。 |
+| [tests/auto_buff/buff_debug_test.cpp](../tests/auto_buff/buff_debug_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 异步诊断快照所有权、源缓冲复用、离线保序与收尾检查。 |
+| [tests/rm_utils/display/display_test.cpp](../tests/rm_utils/display/display_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 显示适配、叠图与 RRD 等诊断输出行为检查。 |
+| [tests/apps/playback_control_test.cpp](../tests/apps/playback_control_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 暂停/继续/单步/退出状态机检查。 |
+| [tests/apps/replay_test.cpp](../tests/apps/replay_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 成对录制/回放/检查流程、时间与姿态缺失等回归。 |
+| [tests/rm_utils/display/sdl_display_test.cpp](../tests/rm_utils/display/sdl_display_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | SDL dummy/software 环境检查三个独立窗口、图像内容、关窗与控制键行为。 |
 | [tests/auto_buff/detect_test.cpp](../tests/auto_buff/detect_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 检测回归入口，组织传统检测与当前 YOLO 解码/像素处理检查。 |
 | [tests/auto_buff/pose_test.cpp](../tests/auto_buff/pose_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 相机坐标关系、PnP、投影及大符灯臂恢复的合成几何检查。 |
 | [tests/auto_buff/predict_test.cpp](../tests/auto_buff/predict_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 恒速/正弦拟合与未来积分/预测行为检查。 |
@@ -268,13 +268,15 @@
 | [tests/cmake/test_openvino_discovery.py](../tests/cmake/test_openvino_discovery.py) | 可选测试/检查，不进入 mas_buff 主流程 | 独立构造环境场景验证 OpenVINO CMake 发现逻辑；不在当前 CTest 列表自动登记。 |
 | [tests/common/synthetic_rune.hpp](../tests/common/synthetic_rune.hpp) | 可选测试/检查，不进入 mas_buff 主流程 | 生成已知相机/空间几何的能量机关合成观测，用于位姿/跟踪回归。 |
 | [tests/common/test.hpp](../tests/common/test.hpp) | 可选测试/检查，不进入 mas_buff 主流程 | 测试断言、运行包装、测试资源路径与临时目录等公共辅助。 |
-| [tests/hardware/camera_test.cpp](../tests/hardware/camera_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 相机诊断命令，显式配置才访问设备；CTest 仅运行 --help。 |
+| [tools/serial_test.cpp](../tools/serial_test.cpp) | 手动诊断工具 | 连接真实串口，接收并打印模式与姿态。 |
+| [tools/buff_preview.cpp](../tools/buff_preview.cpp) | 手动预览工具 | 读取配置指定的图片／视频并显示生产检测结果。 |
+| [tools/camera_test.cpp](../tools/camera_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 相机人工诊断，显式配置后访问真实设备并可显示画面。 |
 | [tests/hardware/frame_pool_test.cpp](../tests/hardware/frame_pool_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 验证队列只消费最新帧及空队列等行为。 |
-| [tests/hardware/serial_test.cpp](../tests/hardware/serial_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 串口诊断与协议自检，提供本工具的 g_shutdown；CTest 仅 --self-test，不访问设备。 |
-| [tests/tools/benchmark_model.py](../tests/tools/benchmark_model.py) | 可选测试/检查，不进入 mas_buff 主流程 | 调用官方 benchmark_app，分别测延迟、吞吐或逐层统计，保存原命令和日志。 |
-| [tests/tools/check_code.py](../tests/tools/check_code.py) | 可选测试/检查，不进入 mas_buff 主流程 | 仅对显式指定的自有 C++ 文件执行格式/clang-tidy/cppcheck，不重写源码。 |
-| [tests/tools/inspect_model.py](../tests/tools/inspect_model.py) | 可选测试/检查，不进入 mas_buff 主流程 | 读取 OpenVINO 模型输入输出，保存模型信息；可选启动本地 Netron。 |
-| [tests/tools/yolo_profile.cpp](../tests/tools/yolo_profile.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | C++ YOLO 独立性能入口，复用生产检测器输出阶段耗时并可配合 Tracy。 |
+| [tests/hardware/serial_protocol_test.cpp](../tests/hardware/serial_protocol_test.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | 串口协议回归，断言包布局与 CRC16 参考结果。 |
+| [tools/benchmark_model.py](../tools/benchmark_model.py) | 可选测试/检查，不进入 mas_buff 主流程 | 调用官方 benchmark_app，分别测延迟、吞吐或逐层统计，保存原命令和日志。 |
+| [tools/check_code.py](../tools/check_code.py) | 可选测试/检查，不进入 mas_buff 主流程 | 仅对显式指定的自有 C++ 文件执行格式/clang-tidy/cppcheck，不重写源码。 |
+| [tools/inspect_model.py](../tools/inspect_model.py) | 可选测试/检查，不进入 mas_buff 主流程 | 读取 OpenVINO 模型输入输出，保存模型信息；可选启动本地 Netron。 |
+| [tools/yolo_profile.cpp](../tools/yolo_profile.cpp) | 可选测试/检查，不进入 mas_buff 主流程 | C++ YOLO 独立性能入口，复用生产检测器输出阶段耗时并可配合 Tracy。 |
 
 ## 16 历史测试工具（不能替代当前三类模型验收）（3 个文件）
 

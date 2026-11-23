@@ -8,10 +8,10 @@ namespace auto_aim
 /**
  * @brief 检测灯条与装甲板的调试绘制
  */
-class DetectDebug : public ArmorDebug
+class DetectDebug : public ArmorDebugBase
 {
 public:
-    explicit DetectDebug(bool enabled = false) : ArmorDebug(enabled, "HikCamera") {}
+    explicit DetectDebug(bool enabled = false) : ArmorDebugBase(enabled, "HikCamera") {}
 
     // 绘制灯条、四角点、类别分数和计数；关闭 debug 时立即返回。
     void draw(const cv::Mat &bgr_img, const std::vector<Armor> &armors, const std::vector<LightBar> &lights);

@@ -18,7 +18,6 @@
 #include <atomic>
 #include <cmath>
 #include <fstream>
-#include <iostream>
 #include <thread>
 #include <poll.h>
 #include <termios.h>
@@ -81,6 +80,17 @@ try
         throw std::runtime_error("pipeline must be armor or buff");
     const auto resolve = [&](const std::string &p)
     { return std::filesystem::absolute(path.parent_path() / tool::from_utf8(p)); };
+    // 普通回放先打开会话日志，再加载媒体和算法；配对检查仍不创建输出目录。
+    std::filesystem::path output;
+    if (!check_only)
+    {
+        const auto output_settings = legacy ? settings : config["output"];
+        output = tool::create_session_directory(
+            resolve(output_settings[legacy ? "output_dir" : "directory"].as<std::string>("../output/replay")));
+        third_party::MasLog::init(tool::utf8(output / "app.log"));
+        MAS_LOG_INFO("Replay config: {}", tool::utf8(path));
+    }
+
     const bool paired = legacy || settings["type"].as<std::string>("paired") == "paired";
     if (!paired && settings["type"].as<std::string>() != "media")
         throw std::runtime_error("input.type must be paired or media");
@@ -113,7 +123,7 @@ try
         std::size_t frames = 0;
         while (!g_shutdown && next(frame))
             ++frames;
-        std::cout << "Pairing check " << (g_shutdown ? "interrupted" : "passed") << ": " << frames << " frames\n";
+        MAS_LOG_INFO("Pairing check {}: {} frames", g_shutdown ? "interrupted" : "passed", frames);
         return g_shutdown ? 130 : 0;
     }
     const auto algorithm_path = resolve(
@@ -122,6 +132,7 @@ try
     const auto parameters = YAML::LoadFile(algorithm_path.string());
     std::unique_ptr<ArmorModules> armor;
     std::unique_ptr<BuffModules> buff;
+    cv::setNumThreads(1);
     if (pipeline == "armor")
         armor = std::make_unique<ArmorModules>(algorithm_path);
     else
@@ -129,18 +140,19 @@ try
     const double speed = legacy ? settings["speed"].as<double>(1) : config["playback"]["speed"].as<double>(1);
     if (!std::isfinite(speed) || speed < 0)
         throw std::runtime_error("Playback speed must be finite and nonnegative");
-    const auto output_settings = legacy ? settings : config["output"];
-    // 回放只读取和显示；原始录制统一由独立 record 程序完成。
-    const auto output = tool::create_session_directory(
-        resolve(output_settings[legacy ? "output_dir" : "directory"].as<std::string>("../output/replay")));
-    third_party::MasLog::init(tool::utf8(output / "app.log"));
     const bool show       = legacy ? settings["display"].as<bool>(true) : config["playback"]["display"].as<bool>(true);
     auto &display         = rm_utils::Display::getInstance();
     auto debug_parameters = YAML::Clone(parameters);
     if (!show)
         for (const auto *name : (pipeline == "armor" ? std::array{"armor_detector", "armor_track", "armor_shoot"}
                                                      : std::array{"detect", "track", "shoot"}))
-            debug_parameters[pipeline == "armor" ? "auto_aim" : "auto_buff"][name]["debug"] = false;
+        {
+            auto module = debug_parameters[pipeline == "armor" ? "auto_aim" : "auto_buff"][name];
+            if (pipeline == "buff" && std::string(name) == "detect")
+                module["common"]["debug"] = false;
+            else
+                module["debug"] = false;
+        }
     if (!show && armor)
     {
         // 原始pose/track开关也受回放的display选项约束，Plotter开关保持独立。
@@ -176,7 +188,7 @@ try
     };
     const auto local_color =
         pipeline == "buff"
-            ? parameters["auto_buff"]["detect"]["color"].as<std::string>("red")
+            ? parameters["auto_buff"]["detect"]["common"]["color"].as<std::string>("red")
             : (parameters["auto_aim"]["armor_detector"]["detect_color"].as<std::string>("RED") == "BLUE" ? "blue"
                                                                                                          : "red");
     std::string color   = local_color;
@@ -193,8 +205,8 @@ try
         }
     };
     tool::RecordedFrame frame;
-    std::cout << "Replay pipeline: " << pipeline << "; input: " << (paired ? "paired" : "media")
-              << "\nOutput: " << tool::utf8(output) << "\nKeys: space pause/resume, n single step, q quit\n";
+    MAS_LOG_INFO("Replay pipeline: {}; input: {}; output: {}", pipeline, paired ? "paired" : "media", tool::utf8(output));
+    MAS_LOG_INFO("Replay keys: space pause/resume, n single step, q quit");
     while (!g_shutdown)
     {
         poll();
@@ -339,7 +351,7 @@ try
     result.close();
     if (!result)
         throw std::runtime_error("Cannot finish replay reports");
-    std::cout << "Replay finished: " << frames << " frames; tracked=" << tracked << '\n';
+    MAS_LOG_INFO("Replay finished: {} frames; tracked={}", frames, tracked);
     return 0;
 }
 catch (...)

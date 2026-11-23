@@ -43,8 +43,8 @@ void save_recording_snapshot(const std::filesystem::path &path, const YAML::Node
     }
     else if (saved["auto_buff"]["detect"]["backend"].as<std::string>("traditional") == "yolo")
     {
-        auto field = saved["auto_buff"]["detect"]["model"];
-        copy_resource(field, fs::path(field.as<std::string>()).extension() == ".xml" ? "model.xml" : "model.onnx");
+        auto field = saved["auto_buff"]["detect"]["yolo"]["model"];
+        copy_resource(field, "model" + fs::path(field.as<std::string>()).extension().string());
     }
     std::ofstream stream(output / (armor ? "auto_aim.yaml" : "auto_buff.yaml"));
     stream << saved;

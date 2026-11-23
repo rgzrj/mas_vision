@@ -7,12 +7,6 @@
 
 namespace replay {
 
-/**
- * @brief 解析 frames.csv，校验连续索引、单调时间及姿态有效性。
- * @return 按录制顺序排列的元数据，图像在 Player::next 中读取。
- */
-std::vector<tool::RecordedFrame> read_metadata(const std::filesystem::path &csv);
-
 // media 可以是视频，也可以是 record 生成的 images 目录；索引始终以 CSV 为准。
 class Player
 {

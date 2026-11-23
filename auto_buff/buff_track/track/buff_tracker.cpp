@@ -1,4 +1,5 @@
 #include "buff_tracker.hpp"
+#include "mas_log.hpp"
 #include "../predict/rune_predictor.hpp"
 #include "../pose/big_activated.hpp"
 #include <Eigen/Geometry>
@@ -75,6 +76,9 @@ RmcsTracker::RmcsTracker(const std::filesystem::path &camera_config, const YAML:
           config_.init_center_gate, config_.init_pitch_bound, config_.diverge_face_angle})
         if (!std::isfinite(value) || value <= 0)
             throw std::runtime_error("RMCS observation noise and gates must be finite and positive");
+
+    MAS_LOG_INFO("Buff tracker ready: camera={}, lost_timeout={}s, prediction={}s",
+                 camera_config.string(), timeout_, horizon_);
 }
 
 void RmcsTracker::set_imu_orientation(const Eigen::Quaterniond &orientation)
@@ -84,37 +88,46 @@ void RmcsTracker::set_imu_orientation(const Eigen::Quaterniond &orientation)
 
 void RmcsTracker::reset()
 {
+    if (model_)
+        MAS_LOG_DEBUG("Buff model reset");
+
     model_.reset();
     last_time_      = -1;
     corrected_time_ = -1;
-    color_ = CampColor::UNKNOWN;
+    color_ = EnemyColor::UNKNOWN;
 }
 
-TrackResult RmcsTracker::update_model(const Detection &detection, double seconds, cv::Size size)
+TrackResult RmcsTracker::update_model(const BuffDetector::Detection &detection, double seconds, cv::Size size)
 {
     if (!std::isfinite(seconds) || seconds < 0)
         throw std::runtime_error("Invalid media timestamp");
     camera_.check_image_size(size);
     // 时间倒退或中断过久时旧模型已不适用；短时漏检仍走下面的 predict 分支。
     if (last_time_ >= 0 && (seconds <= last_time_ || seconds - last_time_ > timeout_))
+    {
+        MAS_LOG_DEBUG("Buff reset: media time discontinuity, previous={}, current={}", last_time_, seconds);
         reset();
+    }
     // 输入已按指定红/蓝筛选；分数只用于选择 R 颜色，不淘汰同色位置候选。
-    const Marker *color_reference = nullptr;
+    const RuneIcon *color_reference = nullptr;
     for (const auto &marker : detection.markers)
     {
-        if (marker.observed && marker.color != CampColor::UNKNOWN && (!color_reference || marker.score > color_reference->score))
+        if (marker.observed && marker.color != EnemyColor::UNKNOWN && (!color_reference || marker.score > color_reference->score))
             color_reference = &marker;
     }
-    if (color_reference && color_ != CampColor::UNKNOWN && color_ != color_reference->color)
+    if (color_reference && color_ != EnemyColor::UNKNOWN && color_ != color_reference->color)
+    {
+        MAS_LOG_DEBUG("Buff reset: target color changed");
         reset();
+    }
     if (color_reference)
         color_ = color_reference->color;
     // 无色 R 不决定目标颜色。YOLO 已按电控/配置筛板，初始化时使用首个有效板的颜色；
     // 模型建立后保持选色，避免同帧红蓝共存时每帧切换。传统有色 R 的选择逻辑不变。
-    if (color_ == CampColor::UNKNOWN)
+    if (color_ == EnemyColor::UNKNOWN)
     {
         for (const auto &board : detection.boards)
-            if ((board.color == CampColor::RED || board.color == CampColor::BLUE) && board.appearance == Appearance::full_mark &&
+            if ((board.color == EnemyColor::RED || board.color == EnemyColor::BLUE) && board.appearance == Appearance::full_mark &&
                 board.features_valid)
             {
                 color_ = board.color;
@@ -124,18 +137,18 @@ TrackResult RmcsTracker::update_model(const Detection &detection, double seconds
     const auto stamp =
         rm_utils::Timestamp{} + std::chrono::duration_cast<rm_utils::Duration>(std::chrono::duration<double>(seconds));
     rm_utils::playback_timestamp = stamp;
-    // 公共 Detection 只在适配层转换一次；模型只消费 R 和符板的几何观测。
+    // 公共 BuffDetector::Detection 只在适配层转换一次；模型只消费 R 和符板的几何观测。
     std::vector<auto_buff::RuneIcon> icons;
     std::vector<auto_buff::RuneBullseye> bullseyes;
     for (const auto &marker : detection.markers)
     {
-        if (marker.observed && (marker.color == CampColor::UNKNOWN || marker.color == color_))
-            icons.push_back({cv::Point2d(marker.center), marker.score});
+        if (marker.observed && (marker.color == EnemyColor::UNKNOWN || marker.color == color_))
+            icons.push_back(marker);
     }
     for (const auto &b : detection.boards)
     {
-        if (b.appearance == Appearance::unknown || (b.color != CampColor::RED && b.color != CampColor::BLUE) ||
-            (color_ != CampColor::UNKNOWN && b.color != color_))
+        if (b.appearance == Appearance::unknown || (b.color != EnemyColor::RED && b.color != EnemyColor::BLUE) ||
+            (color_ != EnemyColor::UNKNOWN && b.color != color_))
             continue;
         // 初始化必须有完整物理端点；已初始化后缺点板仍可提供中心观测。
         if (b.appearance == Appearance::full_mark && !b.features_valid && !model_)
@@ -180,6 +193,15 @@ TrackResult RmcsTracker::update_model(const Detection &detection, double seconds
             model_          = std::move(model);
             corrected_time_ = seconds;
             initialized_now = true;
+
+            const auto now = std::chrono::steady_clock::now();
+            if (init_log_time_ == std::chrono::steady_clock::time_point{} || now - init_log_time_ >= std::chrono::seconds(5))
+            {
+                const auto state = model_->state();
+                MAS_LOG_INFO("Buff model initialized: center=[{:.3f},{:.3f},{:.3f}]m, angle={:.3f}rad",
+                             state.x, state.y, state.z, state.rotation_angle);
+                init_log_time_ = now;
+            }
         }
     }
     else
@@ -191,8 +213,17 @@ TrackResult RmcsTracker::update_model(const Detection &detection, double seconds
         // 原版返回“待击板已校正”；仅 R 或已激活圆环校正不刷新丢失计时。
         if (pending_corrected)
             corrected_time_ = seconds;
-        if (model_->diverged() || seconds - corrected_time_ > timeout_)
+        const bool diverged = model_->diverged();
+        if (diverged || seconds - corrected_time_ > timeout_)
         {
+            const auto now = std::chrono::steady_clock::now();
+            if (!diverged && (lost_log_time_ == std::chrono::steady_clock::time_point{} ||
+                              now - lost_log_time_ >= std::chrono::seconds(5)))
+            {
+                MAS_LOG_WARN("Buff model lost: no pending-board correction for {:.3f}s (limit={}s)",
+                             seconds - corrected_time_, timeout_);
+                lost_log_time_ = now;
+            }
             reset();
             result.status = "lost_or_diverged";
         }
@@ -220,7 +251,7 @@ TrackResult RmcsTracker::update_model(const Detection &detection, double seconds
     return result;
 }
 
-TrackResult RmcsTracker::update(const Detection &detection, double seconds, const cv::Mat &image)
+TrackResult RmcsTracker::update(const BuffDetector::Detection &detection, double seconds, const cv::Mat &image)
 {
     auto result = update_model(detection, seconds, image.size());
     track_debug_.draw(result, image);

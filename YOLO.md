@@ -2,12 +2,13 @@
 
 深大与自训练模型共用一套接口：输入FP32 `[1,3,480,640]`，输出FP32 `[1,18,6300]`；三类为未激活/小符已激活/大符已激活，五点为top/left/R/right/bottom。旧三类/五类Pose权重不再接入。
 
-- yolo.hpp/cpp：模块内读YAML，OpenVINO CPU单流推理，RGB/NCHW/255及居中letterbox。
-- pose_output.hpp/cpp：18通道解码、点有效性、同组中心距离去重，拆分R和符板公共观测。
-- pixel_geometry.hpp/cpp：原图ROI判色和可选像素精修，精修失败保留有效原始点。
+- `yolo.hpp/.cpp`：读取配置、加载模型，组织共用的预处理和后处理。
+- `inference/`：CPU 同步推理和 GPU 请求调度。
+- `observation/`：输出解码、候选去重和公共观测转换。
+- `pixels/`：原图判色、轮廓提取和可选像素精修。
 - 后续pose沿用RMCS的R＋四端点PnP，track和shoot不区分权重来源。
 
-颜色配置仅支持 `red` / `blue`，缺省为 `red`；电控切色仍使用这两个值，不再支持 `auto`。配置示例见[tests/auto_buff/yolo_pose.yaml](tests/auto_buff/yolo_pose.yaml)。模型换成自训练交付文件时只修改model，不能改变类别或点序；nms_distance的单位为原图像素，不再使用iou参数。detect.debug控制检测模块自己的显示。
+颜色配置仅支持 `red` / `blue`，缺省为 `red`；电控切色仍使用这两个值，不再支持 `auto`。配置示例见[tests/auto_buff/yolo_pose.yaml](tests/auto_buff/yolo_pose.yaml)。模型换成自训练交付文件时只修改model，不能改变类别或点序；nms_distance的单位为原图像素，不再使用iou参数。detect.common.debug控制检测模块自己的显示。
 
 基准模型保存在auto_buff/buff_detect/yolo/model/rune_szu.onnx，上游来源/哈希见同目录SZU_MODEL.json，许可见SZU_LICENSE.txt。当前基准不是本项目量化的INT8；INT8交付要求、数据迁移和训练验收统一见[TRAINING_YOLO_POSE.md](TRAINING_YOLO_POSE.md)。
 

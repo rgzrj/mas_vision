@@ -46,7 +46,7 @@ track和shoot恢复原MAS Plotter载荷及独立plotter_enable。track每帧输�
 记录在output/restore_debug_router_20261113/verification.json：
 
 - 原窗口图元回归通过，检查灯条/四点、位姿重投影、预热期模型、选中板颜色及shoot文本。
-- 生产track/shoot载荷回归通过，检查GUI关闭后的原始手眼四点、同帧矩阵、缺观测有效标志及原shoot字段。宿主替换UDP发送端；tests/app/armor_plotter_test.cpp中的真实Linux UDP用例仍需目标机执行。
+- 生产track/shoot载荷回归通过，检查GUI关闭后的原始手眼四点、同帧矩阵、缺观测有效标志及原shoot字段。宿主替换UDP发送端；tests/auto_aim/armor_plotter_test.cpp中的真实Linux UDP用例仍需目标机执行。
 - 当前装甲板和打符paired/media回放回归通过；宿主替换终端按键和Display接收后端，算法、配对IO和快照使用生产源码。
 - SDL按键回归通过；主入口、router、工作线程及迁移后的record/replay接口检查通过。
 - 根构建和两个独立CMake入口的目标依赖检查通过，外部SDK采用占位目标；未执行完整Linux依赖编译。

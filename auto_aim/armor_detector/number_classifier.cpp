@@ -1,5 +1,6 @@
 #include "number_classifier.hpp"
 #include <fstream>
+#include <stdexcept>
 
 #include "armor_types.hpp"
 #include "mas_log.hpp"
@@ -14,28 +15,22 @@ NumberClassifier::NumberClassifier(const std::string &model_path, const std::str
 
     net_ = cv::dnn::readNetFromONNX(model_path); // 加载 ONNX 模型
     if (net_.empty())
-    {
-        MAS_LOG_ERROR("Failed to load model: {}", model_path);
-        model_loaded_ = false;
-    }
-    else
-    {
-        MAS_LOG_INFO("Model loaded successfully: {}", model_path);
-        model_loaded_ = true;
-    }
+        throw std::runtime_error("Failed to load model: " + model_path);
 
     std::ifstream label_file(label_path); // 打开标签文件
     if (!label_file.is_open())
-    {
-        MAS_LOG_ERROR("Failed to open label file: {}", label_path);
-        return;
-    }
+        throw std::runtime_error("Failed to open label file: " + label_path);
 
     std::string line;
     while (std::getline(label_file, line)) // 逐行读取标签
     {
         class_names_.push_back(line);
     }
+    if (class_names_.empty())
+        throw std::runtime_error("Empty label file: " + label_path);
+
+    model_loaded_ = true;
+    MAS_LOG_INFO("Model loaded successfully: {}", model_path);
     MAS_LOG_INFO("Loaded {} class names from: {}", class_names_.size(), label_path);
 }
 

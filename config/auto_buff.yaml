@@ -1,18 +1,21 @@
 # 唯一打符业务配置：实机、离线读取共用；调用处传入hikcamera.yaml和serial_config.yaml，由设备构造函数读取。
 auto_buff:
   detect:
-    tracy_debug: false  # 开启后采集 YOLO 与像素精修耗时，独立于 debug 显示。
-    debug: true                     # 提交最终观测和分数；原始点坐标保留在报告中，不重复叠图。
     backend: traditional            # traditional / yolo，选择检测算法。
-    model: ../auto_buff/buff_detect/yolo/model/rune_szu.onnx # 深大基准；新自训练权重使用完全相同的三类五点协议。
-    confidence: 0.25                # YOLO 目标置信度阈值。
-    point_confidence: 0.8  # 至少三个有效点；PnP 初始化仍要求完整四端点。
-    nms_distance: 30       # 同组符板中心的去重距离，原图像素；不是 IoU。
-    feature_points: rmcs_pixels # none 使用原始四点求板心；rmcs_pixels 在局部 ROI 精修。
-    threads: 4                      # OpenVINO CPU 推理线程数；12900HK 已测 6 优于 4/8，按本机测试设置。
-    opencv_threads: 4               # OpenCV 进程级线程数；传统检测不读取这两项。
-    reuse_buffers: false            # 预处理内存复用对照；目前实测没有整体收益。
-    color: red                     # 启动颜色；首次2/4保留，红蓝模式位变化才切色；接裁判时保持red。
+    common:
+      debug: true                     # 提交最终观测和分数；原始点坐标保留在报告中，不重复叠图。
+      color: red
+    traditional: {}
+    yolo:
+      reuse_buffers: false            # 预处理内存复用对照；目前实测没有整体收益。
+      tracy_debug: false              # 开启后采集 YOLO 与像素精修耗时，独立于 debug 显示。
+      model: ../auto_buff/buff_detect/yolo/model/rune_szu.onnx # 深大基准；新自训练权重使用完全相同的三类五点协议。
+      device: GPU                     # 仅YOLO：CPU 同步；GPU 双请求异步，按提交顺序收取。
+      threads: 4                      # 仅CPU推理使用；GPU不读取，OpenCV统一单线程。
+      confidence: 0.25                # YOLO 目标置信度阈值。
+      point_confidence: 0.8  # 至少三个有效点；PnP 初始化仍要求完整四端点。
+      nms_distance: 30       # 同组符板中心的去重距离，原图像素；不是 IoU。
+      feature_points: rmcs_pixels # none 使用原始四点求板心；rmcs_pixels 在局部 ROI 精修。
   track:
     debug: true                     # 向调试后端提交跟踪投影、角度和速度曲线。
     lost_timeout_s: 1.5
@@ -20,9 +23,12 @@ auto_buff:
   shoot:
     debug: true                     # 向调试后端提交火控图像、角度和飞行时间。
     bullet_speed: 22.5
-    shoot_delay: 0.04
     offset_yaw: 0.0
     offset_pitch: 0.0
+    max_pitch: 80.0                # 最大仰角，单位：degree
+    gravity: 9.81                  # 重力加速度，单位：m/s^2
+    resistance: 0.014              # 二次空气阻力系数，单位：1/m
+    fire_delay_time: 0.080         # 统一发弹延迟，单位：s
     rune_idle_duration: 0.4
     rune_shoot_duration: 0.2
 runtime:
