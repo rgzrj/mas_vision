@@ -1,7 +1,8 @@
 #pragma once
 
-#include <opencv2/core.hpp>
 #include <Eigen/Geometry>
+#include <opencv2/core.hpp>
+
 #include <filesystem>
 
 namespace auto_buff
@@ -43,9 +44,11 @@ private:
     cv::Mat intrinsic_;  // 行主序相机内参。
     cv::Mat distortion_; // k1、k2、p1、p2、k3。
     cv::Size calibration_size_;
+
     Eigen::Isometry3d transform_        = Eigen::Isometry3d::Identity(); // 当前相机到世界变换。
     Eigen::Isometry3d camera_to_gimbal_ = Eigen::Isometry3d::Identity(); // 固定手眼外参。
-    Eigen::Quaterniond gimbal_to_imu_     = Eigen::Quaterniond::Identity();
-    bool dynamic_calibration_             = false; // 是否具备实时 IMU 所需的完整标定。
+    Eigen::Quaterniond gimbal_to_imu_   = Eigen::Quaterniond::Identity();
+
+    bool dynamic_calibration_ = false; // 是否具备实时 IMU 所需的完整标定。
 };
 } // namespace auto_buff

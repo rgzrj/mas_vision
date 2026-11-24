@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <vector>
 
 namespace YAML
 {
@@ -24,8 +25,8 @@ public:
     {
         RuneMode mode    = RuneMode::unknown;
         EnemyColor color = EnemyColor::RED;
-        cv::Mat image;      // 对应原图，只读引用。
-        double seconds = 0; // 曝光或媒体时间，单位秒。
+        cv::Mat image;        // 共享对应原图，像素保持只读。
+        double seconds = 0.0; // 曝光或媒体时间，单位秒。
 
         std::vector<RuneIcon> markers;
         std::vector<Board> boards;
@@ -51,25 +52,35 @@ public:
      * @param image BGR 8UC3 图像；接收后至收取前保持像素只读。
      * @param seconds 曝光或媒体时间，单位秒。
      * @param mode 本帧大小符模式；unknown 仅按颜色过滤。
+     * @return true 已接收，false 满槽拒收；未收取的结果继续占用槽位。
      */
     virtual bool submit(const cv::Mat &image, double seconds, RuneMode mode = RuneMode::unknown) = 0;
 
     /**
-     * @brief 按提交顺序收取、过滤并绘制完成帧，不等待未完成的推理。
-     * @return 完成帧；队首未完成或无待收取帧时返回空。
+     * @brief 按提交顺序收取并过滤完成帧，不等待未完成的推理。
+     * @return 完成帧，允许没有观测；队首未完成或无待收取帧时返回空。
+     * @note 过滤使用提交时的颜色和模式，不使用后续设置。
      */
     std::optional<Detection> collect();
+
+    /**
+     * @brief 绘制已收取的检测结果；调用方先检查帧有效性并设置显示时间。
+     * @note 内部遵守 debug 开关和显示采样，不修改原图。
+     */
+    void draw(const Detection &detection);
 
     void BuffDetector_Set_Color(EnemyColor color)
     {
         color_ = color;
     }
+
     void disable_debug();
 
 protected:
     explicit BuffDetector(const YAML::Node &config);
+
     /**
-     * @brief 实际收集检测结果的实现。
+     * @brief 收取后端完成帧，公共过滤由基类处理。
      * @return 完成帧；没有可收取的完成帧时返回空，未检出目标仍返回结果。
      */
     virtual std::optional<Detection> collect_impl() = 0;

@@ -5,6 +5,7 @@
 #include "auto_buff/buff_track/track/buff_tracker.hpp"
 #include "rm_utils/io/media_reader.hpp"
 #include "tests/common/test.hpp"
+#include "tests/common/detection.hpp"
 #include <yaml-cpp/yaml.h>
 #include <fstream>
 #include <type_traits>
@@ -29,13 +30,14 @@ TEST_MAIN
             BuffDebug::configure_layout(7, false);
             cv::Mat image(240, 320, CV_8UC3, cv::Scalar(10, 20, 30));
             const auto original = image.clone();
-            DetectDebug detect(true);
+            tests::FrameDetector detect(tests::traditional_config("red", YAML::Load("debug: true")));
             TrackDebug track(true);
             ShootDebug shoot(true);
             for (int i = 0; i < 3; ++i)
             {
                 display.set_time(i / 50.);
-                detect.draw({}, image);
+                const auto detection = tests::detect(detect, image, i / 50.);
+                detect.draw(detection);
                 track.draw({}, image);
                 shoot.draw({}, {}, image);
                 display.end_frame();

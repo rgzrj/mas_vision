@@ -73,9 +73,21 @@ Inference::~Inference()
     // 原图与张量必须存活到在途请求结束。
     for (std::size_t i = 0; i < pending_; ++i)
     {
+        auto &request = runtime_->requests[(head_ + i) % capacity_];
+        if (runtime_->gpu)
+        {
+            try
+            {
+                request.cancel();
+            }
+            catch (...)
+            {
+                // 取消失败时仍等待收尾，输入和输出缓冲必须保持存活。
+            }
+        }
         try
         {
-            runtime_->requests[(head_ + i) % capacity_].wait();
+            request.wait();
         }
         catch (...)
         {

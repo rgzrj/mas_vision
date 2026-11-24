@@ -11,6 +11,9 @@ namespace auto_buff
 {
 bool Inference::submit(const cv::Mat &image, double seconds, RuneMode mode, EnemyColor color)
 {
+    if (failed_)
+        throw std::runtime_error("YOLO inference is unavailable after a request failure");
+
     if (pending_ == capacity_)
         return false;
 
@@ -21,9 +24,15 @@ bool Inference::submit(const cv::Mat &image, double seconds, RuneMode mode, Enem
     frame.mode    = mode;
     frame.color   = color;
 
+    try
     {
         ZoneNamedN(zone, "YOLO inference", frame.profiling);
         start(index);
+    }
+    catch (...)
+    {
+        failed_ = true;
+        throw;
     }
 
     ++pending_;
@@ -32,14 +41,30 @@ bool Inference::submit(const cv::Mat &image, double seconds, RuneMode mode, Enem
 
 const Inference::Slot *Inference::front()
 {
+    if (failed_)
+        throw std::runtime_error("YOLO inference is unavailable after a request failure");
+
     if (!pending_)
         return nullptr;
 
     auto &frame = slots_[head_];
-    if (!ready(head_))
-        return nullptr;
+    try
+    {
+        if (!ready(head_))
+        {
+            // 单帧执行的故障阈值，独立于控制链路的图像有效期。
+            if (Clock::now() - frame.submitted >= std::chrono::seconds(5))
+                throw std::runtime_error("YOLO inference request timed out after 5 seconds");
+            return nullptr;
+        }
 
-    frame.output = output(head_);
+        frame.output = output(head_);
+    }
+    catch (...)
+    {
+        failed_ = true;
+        throw;
+    }
     return &frame;
 }
 
@@ -90,7 +115,7 @@ void Inference::prepare(Slot &frame, const cv::Mat &image, float *data)
     cv::split(floating_, channels.data());
 
     timer.finish();
-    frame.submitted = frame.profiling ? Clock::now() : Clock::time_point{};
+    frame.submitted = Clock::now();
 }
 
 } // namespace auto_buff

@@ -161,47 +161,23 @@ void UserSerial::closeSerial()
     MAS_LOG_INFO("Serial port closed");
 }
 
-void UserSerial::sendVision(float yaw, float pitch, uint8_t found, uint8_t fire)
+void UserSerial::set_mode(VisionMode mode)
 {
-    submitVision(getVisionState(), std::chrono::steady_clock::now(), std::chrono::milliseconds(100),
-                 {bool(found), yaw, pitch, fire});
-}
-
-bool UserSerial::submitVision(VisionState state, std::chrono::steady_clock::time_point exposure,
-                              std::chrono::steady_clock::duration max_age, SendPacket packet)
-{
-    if (!isQuaternionValid())
-        packet.found = false;
-    return commands_.submit(state, exposure, max_age, packet);
-}
-
-void UserSerial::disableVision()
-{
-    commands_.clear();
-}
-
-bool UserSerial::disableVision(VisionState state)
-{
-    return commands_.clear(state);
-}
-
-void UserSerial::sendPacketToSerial()
-{
-    while (!g_shutdown && (!isConnected || !serial_port || !serial_port->isOpen()))
+    std::lock_guard lock(state_mutex_);
+    if (state_.mode != mode)
     {
-        reconnect();
-        if (!isConnected || !serial_port || !serial_port->isOpen())
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        state_.mode = mode;
+        ++state_.epoch;
     }
-    if (g_shutdown)
+}
+
+void UserSerial::sendPacketToSerial(SendPacket packet)
+{
+    if (g_shutdown || !isConnected || !serial_port || !serial_port->isOpen())
         return;
 
     try
     {
-        if (!isQuaternionValid())
-            commands_.clear();
-        const auto packet = commands_.packet(std::chrono::steady_clock::now());
-
         std::array<uint8_t, TX_FRAME_SIZE> frame{};
         frame[0] = TX_HEADER;
         std::memcpy(frame.data() + 1, &packet, sizeof(packet));
@@ -292,25 +268,25 @@ void UserSerial::receiveSerial()
                     switch (packet.mode)
                     {
                     case 0:
-                        commands_.set_mode(VisionMode::AUTO_AIM_RED);
+                        set_mode(VisionMode::AUTO_AIM_RED);
                         break;
                     case 1:
-                        commands_.set_mode(VisionMode::AUTO_AIM_BLUE);
+                        set_mode(VisionMode::AUTO_AIM_BLUE);
                         break;
                     case 2:
-                        commands_.set_mode(VisionMode::SMALL_RUNE_RED);
+                        set_mode(VisionMode::SMALL_RUNE_RED);
                         break;
                     case 3:
-                        commands_.set_mode(VisionMode::SMALL_RUNE_BLUE);
+                        set_mode(VisionMode::SMALL_RUNE_BLUE);
                         break;
                     case 4:
-                        commands_.set_mode(VisionMode::BIG_RUNE_RED);
+                        set_mode(VisionMode::BIG_RUNE_RED);
                         break;
                     case 5:
-                        commands_.set_mode(VisionMode::BIG_RUNE_BLUE);
+                        set_mode(VisionMode::BIG_RUNE_BLUE);
                         break;
                     default:
-                        commands_.set_mode(VisionMode::AUTO_AIM_RED);
+                        set_mode(VisionMode::AUTO_AIM_RED);
                         MAS_LOG_WARN("[UserSerial] Invalid mode: {}", packet.mode);
                         break;
                     }
@@ -362,8 +338,10 @@ void UserSerial::reconnect()
     }
     isConnected = false;
 
-    commands_.new_session();
-    disableVision();
+    {
+        std::lock_guard lock(state_mutex_);
+        ++state_.epoch;
+    }
     pose_cutoff_ns_.store(
         std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now().time_since_epoch())
             .count());

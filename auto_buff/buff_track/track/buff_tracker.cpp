@@ -1,42 +1,14 @@
 #include "buff_tracker.hpp"
+#include "rune_model.hpp"
 #include "mas_log.hpp"
 #include "../predict/rune_predictor.hpp"
 #include "../pose/big_activated.hpp"
 #include <Eigen/Geometry>
 #include <cmath>
-#include <iomanip>
-#include <sstream>
 #include <stdexcept>
 
 namespace auto_buff
 {
-// 将当前运动模型组织为调试文字，不改变模型状态。
-std::string rune_motion_text(const TrackResult &track)
-{
-    if (!track.initialized)
-        return {};
-    const auto &state = track.state;
-    std::ostringstream out;
-    out << std::fixed << std::setprecision(2) << std::showpos;
-    // 字段及回退顺序沿用 RMCS：正弦拟合 → 恒速拟合 → EKF 当前角度。
-    if (state.sine_valid)
-    {
-        out << "spd_" << std::noshowpos << state.update_count << std::showpos << "(t)=" << state.sine_v << state.sine_a
-            << "*sin(" << state.sine_phase << state.sine_omega << "t)";
-    }
-    else if (state.use_prediction_speed)
-    {
-        out << "spd_" << std::noshowpos << state.update_count << std::showpos << "(t)=" << state.rotation_speed;
-    }
-    else
-    {
-        out << "theta_ekf=" << state.rotation_angle;
-        return out.str();
-    }
-    out << ", e=" << std::noshowpos << std::setprecision(3) << state.prediction_cost;
-    return out.str();
-}
-
 RmcsTracker::RmcsTracker(const std::filesystem::path &config_path, const std::filesystem::path &camera_config)
     : RmcsTracker(camera_config, YAML::LoadFile(config_path.string())["auto_buff"]["track"])
 {
@@ -77,9 +49,11 @@ RmcsTracker::RmcsTracker(const std::filesystem::path &camera_config, const YAML:
         if (!std::isfinite(value) || value <= 0)
             throw std::runtime_error("RMCS observation noise and gates must be finite and positive");
 
-    MAS_LOG_INFO("Buff tracker ready: camera={}, lost_timeout={}s, prediction={}s",
-                 camera_config.string(), timeout_, horizon_);
+    MAS_LOG_INFO("Buff tracker ready: camera={}, lost_timeout={}s, prediction={}s", camera_config.string(), timeout_,
+                 horizon_);
 }
+
+RmcsTracker::~RmcsTracker() = default;
 
 void RmcsTracker::set_imu_orientation(const Eigen::Quaterniond &orientation)
 {
@@ -94,7 +68,7 @@ void RmcsTracker::reset()
     model_.reset();
     last_time_      = -1;
     corrected_time_ = -1;
-    color_ = EnemyColor::UNKNOWN;
+    color_          = EnemyColor::UNKNOWN;
 }
 
 TrackResult RmcsTracker::update_model(const BuffDetector::Detection &detection, double seconds, cv::Size size)
@@ -112,7 +86,8 @@ TrackResult RmcsTracker::update_model(const BuffDetector::Detection &detection, 
     const RuneIcon *color_reference = nullptr;
     for (const auto &marker : detection.markers)
     {
-        if (marker.observed && marker.color != EnemyColor::UNKNOWN && (!color_reference || marker.score > color_reference->score))
+        if (marker.observed && marker.color != EnemyColor::UNKNOWN &&
+            (!color_reference || marker.score > color_reference->score))
             color_reference = &marker;
     }
     if (color_reference && color_ != EnemyColor::UNKNOWN && color_ != color_reference->color)
@@ -127,8 +102,8 @@ TrackResult RmcsTracker::update_model(const BuffDetector::Detection &detection, 
     if (color_ == EnemyColor::UNKNOWN)
     {
         for (const auto &board : detection.boards)
-            if ((board.color == EnemyColor::RED || board.color == EnemyColor::BLUE) && board.appearance == Appearance::full_mark &&
-                board.features_valid)
+            if ((board.color == EnemyColor::RED || board.color == EnemyColor::BLUE) &&
+                board.appearance == Appearance::full_mark && board.features_valid)
             {
                 color_ = board.color;
                 break;
@@ -195,11 +170,12 @@ TrackResult RmcsTracker::update_model(const BuffDetector::Detection &detection, 
             initialized_now = true;
 
             const auto now = std::chrono::steady_clock::now();
-            if (init_log_time_ == std::chrono::steady_clock::time_point{} || now - init_log_time_ >= std::chrono::seconds(5))
+            if (init_log_time_ == std::chrono::steady_clock::time_point{} ||
+                now - init_log_time_ >= std::chrono::seconds(5))
             {
                 const auto state = model_->state();
-                MAS_LOG_INFO("Buff model initialized: center=[{:.3f},{:.3f},{:.3f}]m, angle={:.3f}rad",
-                             state.x, state.y, state.z, state.rotation_angle);
+                MAS_LOG_INFO("Buff model initialized: center=[{:.3f},{:.3f},{:.3f}]m, angle={:.3f}rad", state.x,
+                             state.y, state.z, state.rotation_angle);
                 init_log_time_ = now;
             }
         }

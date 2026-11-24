@@ -1,4 +1,5 @@
 #include "vision_router.hpp"
+#include "vision_command.hpp"
 
 #include "hardware/serial/user_serial.hpp"
 #include "rm_utils/display/display.hpp"
@@ -13,10 +14,11 @@ extern std::atomic<bool> g_shutdown;
 
 namespace threads
 {
-void vision_router_func(rigtorp::SPSCQueue<CameraFrame> &camera, VisionQueue &armor, VisionQueue &buff)
+void vision_router_func(VisionCommand &commands, rigtorp::SPSCQueue<CameraFrame> &camera,
+                        VisionQueue &armor, VisionQueue &buff)
 {
     auto &serial = UserSerial::getInstance();
-
+    
     const auto armor_color =
         YAML::LoadFile("config/auto_aim.yaml")["auto_aim"]["armor_detector"]["detect_color"].as<std::string>("RED")
             == "BLUE" ? "blue" : "red";
@@ -28,6 +30,7 @@ void vision_router_func(rigtorp::SPSCQueue<CameraFrame> &camera, VisionQueue &ar
     const double seconds = buff_config["runtime"]["max_runtime_s"].as<double>(0);
     if (!std::isfinite(age) || age < 1 || age > 1000 || !std::isfinite(seconds) || seconds < 0)
         throw std::runtime_error("Invalid runtime duration or frame age");
+
     const auto max_age =
         std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double, std::milli>(age));
     const auto started = std::chrono::steady_clock::now();
@@ -45,11 +48,8 @@ void vision_router_func(rigtorp::SPSCQueue<CameraFrame> &camera, VisionQueue &ar
 
         // 即使没有图像也排出串口姿态队列，避免模式闲置时积满。
         serial.pollPose();
-        const auto state = serial.getVisionState();
-        const auto task  = state.mode <= AUTO_AIM_BLUE     ? VisionTask::armor
-                           : state.mode <= SMALL_RUNE_BLUE ? VisionTask::small_rune
-                                                           : VisionTask::big_rune;
-        const bool aim   = task == VisionTask::armor;
+        const auto state = commands.state();
+        const bool aim   = state.mode <= AUTO_AIM_BLUE;
 
         // 这里只更新显示布局，SDL 窗口由主线程操作。
         if (shown_armor != aim)
@@ -70,8 +70,7 @@ void vision_router_func(rigtorp::SPSCQueue<CameraFrame> &camera, VisionQueue &ar
             continue;
         }
 
-        VisionFrame routed{std::move(frame), state, color, {}};
-        routed.task    = task;
+        VisionFrame routed{std::move(frame), {}, state, color};
         routed.max_age = max_age;
         routed.pose    = serial.awaitPose(routed.camera.timestamp);
 

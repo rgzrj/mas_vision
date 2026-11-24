@@ -1,11 +1,13 @@
 #pragma once
 
 #include "auto_buff/buff_track/buff_state.hpp"
+
 #include <opencv2/core.hpp>
 #include <Eigen/Geometry>
 #include <optional>
 
-namespace auto_buff {
+namespace auto_buff
+{
 
 /**
  * @brief 遍历 R × 待击板候选，用 PnP 和整体几何选择初始位姿。
@@ -21,7 +23,8 @@ namespace auto_buff {
  * 传统检测仍使用同一入口；此层不根据模型来源切换算法。
  * 沿用上游限制：初始化需要 1～2 块待击板，超过两块时本轮不建立模型。
  */
-auto solve_rune_pose(const RuneConfig &config, const cv::Mat &intrinsic, const cv::Mat &distortion, const Eigen::Isometry3d &camera_transform, std::span<const auto_buff::RuneIcon> icons,
-                     std::span<const auto_buff::RuneBullseye> bullseyes) -> std::optional<RunePose>;
+auto solve_rune_pose(const RuneConfig &config, const cv::Mat &intrinsic, const cv::Mat &distortion,
+                     const Eigen::Isometry3d &camera_transform, std::span<const RuneIcon> icons,
+                     std::span<const RuneBullseye> bullseyes) -> std::optional<RunePose>;
 
 } // namespace auto_buff

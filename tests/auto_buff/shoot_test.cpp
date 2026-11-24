@@ -2,6 +2,7 @@
 #include "rm_utils/algorithm/trajectory.hpp"
 #include "tests/common/test.hpp"
 #include <cmath>
+#include <fstream>
 
 using tests::require;
 
@@ -42,6 +43,35 @@ int main() {
                     std::hypot(shoot_aim->attack.y() - shoot_aim->center.y(),
                                shoot_aim->attack.z() - shoot_aim->center.z()) > .6,
                 "Rune fire control missed the RMCS shoot window or future blade");
+
+        // 文件入口与直接配置使用相同参数、单位和解算时钟。
+        tests::TemporaryDirectory directory;
+        const auto config_path = directory.path / "auto_buff.yaml";
+        std::ofstream(config_path)
+            << "auto_buff: {shoot: {bullet_speed: 24.0, fire_delay_time: 0.05, "
+               "offset_yaw: 2.0, offset_pitch: -1.0, debug: false}}\n";
+
+        auto config            = auto_buff::RuneShooter::Config{};
+        config.bullet_speed    = 24.0;
+        config.fire_delay_time = 0.05;
+        config.offset_yaw      = 2.0;
+        config.offset_pitch    = -1.0;
+
+        auto_buff::RuneShooter configured(config);
+        auto_buff::RuneShooter loaded(config_path);
+        std::filesystem::remove(config_path);
+
+        configured.update({stamp});
+        loaded.update({stamp});
+        const auto expected = configured.aim(state, stamp);
+        const auto actual   = loaded.aim(state, stamp);
+        require(expected && actual && std::abs(actual->aim_yaw - expected->aim_yaw) < 1e-12 &&
+                    std::abs(actual->aim_pitch - expected->aim_pitch) < 1e-12 &&
+                    std::abs(actual->fly_time - expected->fly_time) < 1e-12 &&
+                    std::abs(actual->prediction_time - expected->prediction_time) < 1e-12 &&
+                    actual->idle == expected->idle && actual->should_shoot == expected->should_shoot,
+                "File and direct fire-control configuration differ");
+
         require(std::abs(shoot_aim->aim_yaw - .134059) < 1e-6 &&
                     std::abs(shoot_aim->aim_pitch + .0133239) < 1e-6 &&
                     std::abs(shoot_aim->fly_time - .225999) < 1e-6,
@@ -50,6 +80,7 @@ int main() {
         const auto next_idle = shooter.aim(state, stamp);
         require(next_idle && !next_idle->should_shoot && next_idle->idle,
                 "Rune fire control did not return to the RMCS idle window");
+
         std::cout << "yaw=" << shoot_aim->aim_yaw << " pitch=" << shoot_aim->aim_pitch
                   << " fly_time=" << shoot_aim->fly_time << " prediction=" << shoot_aim->prediction_time
                   << '\n';

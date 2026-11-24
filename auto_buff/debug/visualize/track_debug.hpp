@@ -2,9 +2,14 @@
 
 #include "auto_buff/debug/buff_debug.hpp"
 
+#include <string>
+
 namespace auto_buff
 {
 struct TrackResult;
+
+// 当前拟合公式的显示文本。
+std::string rune_motion_text(const TrackResult &track);
 
 // 展示本帧模型、匹配观测与未来投影；不修改跟踪状态。
 class TrackDebug : public BuffDebugBase

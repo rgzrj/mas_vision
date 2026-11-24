@@ -1,14 +1,10 @@
 #pragma once
-#include "serial_types.hpp"
+#include "hardware/serial/serial_types.hpp"
 #include <cmath>
 #include <mutex>
 
-struct VisionState
+namespace threads
 {
-    VisionMode mode     = AUTO_AIM_RED;
-    std::uint64_t epoch = 0;
-};
-
 // 模式切换、结果验收和发送快照共用一把锁。算法计算期间不持锁。
 class VisionCommand
 {
@@ -21,13 +17,14 @@ public:
         return state_;
     }
 
-    void set_mode(VisionMode mode)
+    // 串口线程发布接收状态；模式切换或重连后撤销上一轮指令。
+    void update(VisionState state)
     {
         std::lock_guard lock(mutex_);
-        if (state_.mode == mode)
+        if (state.mode == state_.mode && state.epoch == state_.epoch)
             return;
-        state_.mode = mode;
-        ++state_.epoch;
+
+        state_ = state;
         invalidate();
     }
 
@@ -49,29 +46,12 @@ public:
         return true;
     }
 
-    SendPacket packet(Clock::time_point now)
+    SendPacket packet(Clock::time_point now, bool pose_valid = true)
     {
         std::lock_guard lock(mutex_);
-        if (now >= deadline_)
+        if (!pose_valid || now >= deadline_)
             invalidate();
         return packet_;
-    }
-
-    /**
-     * @brief 开启新会话，丢弃旧快照。
-     * @details 该函数必须在持锁的情况下调用。
-     */
-    void new_session()
-    {
-        std::lock_guard lock(mutex_);
-        ++state_.epoch;
-        invalidate();
-    }
-
-    void clear()
-    {
-        std::lock_guard lock(mutex_);
-        invalidate();
     }
 
     bool clear(VisionState source)
@@ -86,7 +66,7 @@ public:
 
 private:
     /**
-     * @brief 清空发送快照，避免过期数据被误用。
+     * @brief 撤销跟随和开火，保留最后一次目标角度。
      * @details 该函数必须在持锁的情况下调用。
      */
     void invalidate()
@@ -100,3 +80,4 @@ private:
     SendPacket packet_{};
     Clock::time_point deadline_{};
 };
+} // namespace threads

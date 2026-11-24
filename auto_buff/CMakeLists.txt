@@ -27,7 +27,9 @@ add_library(auto_buff STATIC
 )
 
 vision_target_options(auto_buff)
-target_link_libraries(auto_buff PUBLIC rm_utils buff_utils buff_display ${BUFF_YAML_TARGET})
+target_link_libraries(auto_buff
+    PUBLIC rm_utils buff_utils buff_display ${BUFF_YAML_TARGET}
+    PRIVATE opencv_imgproc opencv_calib3d)
 
 if(YOLO_RUNTIME STREQUAL "OPENVINO")
     target_sources(auto_buff PRIVATE buff_detect/yolo/inference/openvino.cpp)

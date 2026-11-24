@@ -5,6 +5,6 @@ add_library(buff_display STATIC
     rerun/rerun_display.cpp)
 vision_target_options(buff_display)
 target_link_libraries(buff_display
-    PUBLIC buff_options ${OpenCV_LIBS}
-    PRIVATE buff_utils ${BUFF_YAML_TARGET} SDL2::SDL2 rerun_sdk)
+    PUBLIC buff_options opencv_core
+    PRIVATE opencv_imgproc opencv_imgcodecs buff_utils ${BUFF_YAML_TARGET} SDL2::SDL2 rerun_sdk)
 target_include_directories(buff_display PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" ${OpenCV_INCLUDE_DIRS})

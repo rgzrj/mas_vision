@@ -16,6 +16,7 @@
 #include "threads/hikcamera_thread/hikcamera_thread.hpp"
 #include "threads/serial_thread/serial_thread.hpp"
 #include "threads/vision_router/vision_router.hpp"
+#include "threads/vision_router/vision_command.hpp"
 #include "threads/armor_thread/armor_thread.hpp"
 #include "threads/buff_thread/buff_thread.hpp"
 
@@ -76,6 +77,7 @@ int main(int argc, char **argv)
         size_t camera_buffer_size = 2;
         auto camera_buffer        = std::make_shared<rigtorp::SPSCQueue<CameraFrame>>(camera_buffer_size);
         threads::VisionQueue armor_queue(2), buff_queue(2);
+        threads::VisionCommand commands;
         BS::thread_pool pool(5);
 
         try
@@ -99,10 +101,11 @@ int main(int argc, char **argv)
             // 五个任务只启动一次，切模式由router处理。
             auto camera_future = submit_task(
                 [&] { threads::hikcamera_thread_func("config/hikcamera.yaml", camera_buffer_size, camera_buffer); });
-            auto serial_future = submit_task([] { threads::serial_thread_func(); });
-            auto router_future = submit_task([&] { threads::vision_router_func(*camera_buffer, armor_queue, buff_queue); });
-            auto armor_future  = submit_task([&] { threads::armor_thread_func(armor_queue, aim_config_path); });
-            auto buff_future   = submit_task([&] { threads::buff_thread_func(buff_queue, buff_config_path); });
+            auto serial_future = submit_task([&] { threads::serial_thread_func(commands); });
+            auto router_future = submit_task(
+                [&] { threads::vision_router_func(commands, *camera_buffer, armor_queue, buff_queue); });
+            auto armor_future  = submit_task([&] { threads::armor_thread_func(commands, armor_queue, aim_config_path); });
+            auto buff_future   = submit_task([&] { threads::buff_thread_func(commands, buff_queue, buff_config_path); });
 
             MAS_LOG_INFO("Thread pool created with {} threads; output: {}", pool.get_thread_count(),
                          tool::utf8(output));

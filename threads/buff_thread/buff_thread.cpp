@@ -1,10 +1,10 @@
 #include "buff_thread.hpp"
+#include "threads/vision_router/vision_command.hpp"
 
 #include "auto_buff/buff_detect/buff_detector.hpp"
 #include "auto_buff/buff_shoot/rune_shooter.hpp"
 #include "auto_buff/buff_track/track/buff_tracker.hpp"
 #include "auto_buff/debug/buff_debug.hpp"
-#include "hardware/serial/user_serial.hpp"
 #include "mas_log.hpp"
 
 #include <atomic>
@@ -17,17 +17,18 @@ extern std::atomic<bool> g_shutdown;
 
 namespace threads
 {
-void buff_thread_func(VisionQueue &queue, const std::filesystem::path &config)
+void buff_thread_func(VisionCommand &commands, VisionQueue &queue, const std::filesystem::path &config)
 {
     MAS_LOG_INFO("Buff processing thread started");
 
     auto detector = auto_buff::BuffDetector::create(config);
-    
+    if (!detector)
+        throw std::runtime_error("Buff detector initialization failed");
+
     auto_buff::RmcsTracker tracker(config, config.parent_path() / "hikcamera.yaml");
     auto_buff::RuneShooter shooter(config);
 
     const auto_buff::BuffDebug debug(config);
-    UserSerial &serial = UserSerial::getInstance();
 
     using Clock = std::chrono::steady_clock;
 
@@ -40,13 +41,13 @@ void buff_thread_func(VisionQueue &queue, const std::filesystem::path &config)
     // 检查模式版本和图像有效期。
     const auto check_frame = [&](const VisionFrame &frame)
     {
-        if (frame.state.epoch != serial.getVisionState().epoch)
+        if (frame.state.epoch != commands.state().epoch)
             return false;
 
         const auto now = Clock::now();
         if (frame.camera.timestamp > now || now - frame.camera.timestamp > frame.max_age)
         {
-            serial.disableVision(frame.state);
+            commands.clear(frame.state);
             return false;
         }
 
@@ -92,8 +93,8 @@ void buff_thread_func(VisionQueue &queue, const std::filesystem::path &config)
         }
 
         // 无姿态或无解时撤销指令，保留上次角度。
-        const bool accepted = packet ? serial.submitVision(frame.state, timestamp, frame.max_age, *packet)
-                                     : serial.disableVision(frame.state);
+        const bool accepted = packet ? commands.submit(frame.state, timestamp, frame.max_age, *packet)
+                                     : commands.clear(frame.state);
         if (!accepted)
             return;
 
@@ -108,11 +109,15 @@ void buff_thread_func(VisionQueue &queue, const std::filesystem::path &config)
         // 收取和绘制均使用队首对应帧；后一请求先完成时继续保留。
         if (!pending.empty())
         {
-            const auto display_frame = debug.begin_frame(pending.front().camera.timestamp);
             if (auto detection = detector->collect())
             {
+                // 收取不触碰显示；旧模式或过期帧直接丢弃。
                 if (check_frame(pending.front()))
+                {
+                    const auto display_frame = debug.begin_frame(pending.front().camera.timestamp);
+                    detector->draw(*detection);
                     process(pending.front(), *detection);
+                }
                 pending.pop_front();
                 progressed = true;
             }
@@ -137,7 +142,7 @@ void buff_thread_func(VisionQueue &queue, const std::filesystem::path &config)
                     detector->BuffDetector_Set_Color(auto_buff::EnemyColor::RED);
 
                 const auto mode =
-                    frame->task == VisionTask::big_rune ? auto_buff::RuneMode::big : auto_buff::RuneMode::small;
+                    frame->state.mode >= BIG_RUNE_RED ? auto_buff::RuneMode::big : auto_buff::RuneMode::small;
                 const double seconds =
                     std::chrono::duration<double>(frame->camera.timestamp.time_since_epoch()).count();
                 if (detector->submit(frame->camera.frame, seconds, mode))

@@ -7,7 +7,7 @@
 
 namespace tests
 {
-// 离线检查逐帧等待，生产接口仍只有提交和收取。
+// 离线检查逐帧等待，保持提交与结果一一对应。
 inline auto_buff::BuffDetector::Detection detect(auto_buff::BuffDetector &detector, const cv::Mat &image,
                                                  double seconds,
                                                  auto_buff::RuneMode mode = auto_buff::RuneMode::unknown)

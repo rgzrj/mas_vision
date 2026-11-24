@@ -1,4 +1,5 @@
 #include "threads/vision_router/vision_router.hpp"
+#include "threads/vision_router/vision_command.hpp"
 #include "auto_aim/debug/armor_debug.hpp"
 #include "auto_buff/debug/buff_debug.hpp"
 #include "hardware/serial/user_serial.hpp"
@@ -63,6 +64,7 @@ int main()
                           auto &serial = UserSerial::getInstance();
                           rigtorp::SPSCQueue<CameraFrame> camera(2);
                           threads::VisionQueue armor(2), rune(2);
+                          threads::VisionCommand commands;
                           for (const std::string color : {"red", "blue"})
                           {
                               auto aim_config = YAML::LoadFile(aim.string());
@@ -78,21 +80,18 @@ int main()
                               {
                                   g_shutdown = false;
                                   feed(serial, mode);
+                                  commands.update(serial.getVisionState());
                                   CameraFrame image;
                                   image.frame     = cv::Mat::zeros(2, 2, CV_8UC3);
                                   image.timestamp = std::chrono::steady_clock::now();
                                   require(camera.try_push(std::move(image)), "Camera test queue full");
-                                  threads::vision_router_func(camera, armor, rune);
+                                  threads::vision_router_func(commands, camera, armor, rune);
                                   require(g_shutdown, "Runtime deadline did not notify all tasks");
                                   auto &active      = mode <= 1 ? armor : rune;
                                   const auto *frame = active.front();
                                   require(frame != nullptr, "Frame was not routed");
                                   require(frame->state.mode == mode && frame->color == ((mode & 1) ? "blue" : color),
                                           "Mode or YAML color mapping changed");
-                                  const auto task = mode <= 1   ? threads::VisionTask::armor
-                                                    : mode <= 3 ? threads::VisionTask::small_rune
-                                                                : threads::VisionTask::big_rune;
-                                  require(frame->task == task, "Wrong pipeline task");
                                   require(frame->max_age == std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                                                                 std::chrono::duration<double, std::milli>(17.5)),
                                           "Frame age setting was not propagated");
@@ -101,7 +100,7 @@ int main()
                               }
                           }
                           g_shutdown = false;
-                          threads::vision_router_func(camera, armor, rune);
+                          threads::vision_router_func(commands, camera, armor, rune);
                           require(g_shutdown, "No-frame run ignored its deadline");
                           auto config                        = YAML::LoadFile(buff.string());
                           config["runtime"]["max_runtime_s"] = 0;
@@ -116,7 +115,7 @@ int main()
                                       stopped_early = g_shutdown.load();
                                       g_shutdown    = true;
                                   });
-                              threads::vision_router_func(camera, armor, rune);
+                              threads::vision_router_func(commands, camera, armor, rune);
                           }
                           require(!stopped_early, "Zero runtime should wait for the shutdown signal");
                           config["runtime"]["max_frame_age_ms"] = 0;
@@ -125,7 +124,7 @@ int main()
                           g_shutdown    = false;
                           try
                           {
-                              threads::vision_router_func(camera, armor, rune);
+                              threads::vision_router_func(commands, camera, armor, rune);
                           }
                           catch (const std::runtime_error &)
                           {

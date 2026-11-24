@@ -1,7 +1,10 @@
 #include "buff_process.hpp"
+#include <atomic>
 #include <cmath>
 #include <stdexcept>
 #include <thread>
+
+extern std::atomic<bool> g_shutdown;
 
 namespace app
 {
@@ -23,9 +26,16 @@ auto_buff::TrackResult process_buff_frame(BuffModules &modules, const BuffFrame 
     auto detection = modules.detector->collect();
     while (!detection)
     {
+        if (g_shutdown)
+        {
+            auto_buff::TrackResult interrupted;
+            interrupted.status = "interrupted";
+            return interrupted;
+        }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
         detection = modules.detector->collect();
     }
+    modules.detector->draw(*detection);
     if (frame.require_pose && !frame.imu_orientation)
     {
         modules.reset();

@@ -48,7 +48,7 @@ struct RuneModel::Impl
 
         RunePrediction prediction;
 
-        auto set_noise(const Config &config) noexcept
+        auto set_noise(const RuneConfig &config) noexcept
         {
             noise_process.diagonal() << config.noise_x, config.noise_y, config.noise_z, config.noise_rotation_speed,
                 config.noise_rotation_angle, config.noise_face_yaw;
@@ -65,7 +65,7 @@ struct RuneModel::Impl
         // 导出值副本给预测和火控；角速度可用拟合值，位置和当前转角仍取 EKF 后验。
         auto get_state(const std::array<bool, 5> &inactive, rm_utils::Timestamp start_timestamp) const noexcept
         {
-            return State{
+            return RuneState{
                 .x               = posteriors_state[kX],
                 .y               = posteriors_state[kY],
                 .z               = posteriors_state[kZ],
@@ -91,18 +91,18 @@ struct RuneModel::Impl
         }
     };
 
-    Config config{};
+    RuneConfig config{};
     Observable observable;
 
     Context context;
-    std::array<bool, 5> blade_inactive{};              // true 表示该板位仍可击打，沿用原版 inactive 命名。
+    std::array<bool, 5> blade_inactive{};                        // true 表示该板位仍可击打，沿用原版 inactive 命名。
     std::array<rm_utils::Timestamp, 5> blade_inactive_timeout{}; // 最近待击板校正延长该板位有效期。
-    Addition addition{};
+    RuneAddition addition{};
     rm_utils::Timestamp init_timestamp{};
     rm_utils::Timestamp current_stamp;
     RunePredictor predictor;
 
-    explicit Impl(const Config &cfg) noexcept
+    explicit Impl(const RuneConfig &cfg) noexcept
     {
         config = cfg;
         context.set_noise(config);
@@ -112,7 +112,7 @@ struct RuneModel::Impl
     // 初始化求解和跟踪投影共享同一份内参与畸变，避免两条几何路径不一致。
     auto configure_camera(const cv::Mat &matrix, const cv::Mat &coeff) noexcept -> void
     {
-        observable.intrinsic = matrix;
+        observable.intrinsic  = matrix;
         observable.distortion = coeff;
     }
 
@@ -148,10 +148,9 @@ struct RuneModel::Impl
         if (state.hasNaN())
             return ObsJacobian::Zero();
 
-        const auto theta = state[kA];
-        const auto psi   = state[kPsi];
-        const auto r_cam_from_odom =
-            observable.camera_to_world.rotation().transpose().eval();
+        const auto theta           = state[kA];
+        const auto psi             = state[kPsi];
+        const auto r_cam_from_odom = observable.camera_to_world.rotation().transpose().eval();
 
         const auto &cam_pt   = observable.in_camera[feature_id];
         const auto point_ocv = rm_utils::util::ros2opencv_position(cam_pt);
@@ -200,7 +199,8 @@ struct RuneModel::Impl
         {
             static constexpr std::array kBladeDeg = {0.0, 72.0, 144.0, 216.0, 288.0};
             const auto alpha                      = theta + rm_utils::deg2rad(kBladeDeg[feature_id - 1]);
-            local_point = Eigen::Vector3d(0, -auto_buff::kRuneGlobalRadius * std::sin(alpha), auto_buff::kRuneGlobalRadius * std::cos(alpha));
+            local_point                           = Eigen::Vector3d(0, -auto_buff::kRuneGlobalRadius * std::sin(alpha),
+                                                                    auto_buff::kRuneGlobalRadius * std::cos(alpha));
             Eigen::Vector3d d_local_d_theta(0, -auto_buff::kRuneGlobalRadius * std::cos(alpha),
                                             -auto_buff::kRuneGlobalRadius * std::sin(alpha));
             pos_jac.col(kA) = r_face * d_local_d_theta;
@@ -244,7 +244,8 @@ struct RuneModel::Impl
             return false;
         posterior_state[kPsi] = rm_utils::limit_rad(posterior_state[kPsi]);
 
-        const auto posterior_covariance = rm_utils::util::correct_covariance(prior_covariance, jacobian, kalman_gain, noise_obs);
+        const auto posterior_covariance =
+            rm_utils::util::correct_covariance(prior_covariance, jacobian, kalman_gain, noise_obs);
 
         context.posteriors_state      = posterior_state;
         context.posteriors_covariance = posterior_covariance;
@@ -255,11 +256,12 @@ struct RuneModel::Impl
 
     // 初始化：PnP 给出中心、符面偏航和相位；初始角速度置零，再用 R/种子中心校正。
 
-    auto init(std::span<const auto_buff::RuneIcon> icons, std::span<const auto_buff::RuneBullseye> bullseyes, rm_utils::Timestamp timestamp) noexcept
-        -> bool
+    auto init(std::span<const auto_buff::RuneIcon> icons, std::span<const auto_buff::RuneBullseye> bullseyes,
+              rm_utils::Timestamp timestamp) noexcept -> bool
     {
         // pose 只返回几何解；滤波状态和协方差仍由 track 初始化并持有。
-        const auto best_candidate = solve_rune_pose(config, observable.intrinsic, observable.distortion, observable.camera_to_world, icons, bullseyes);
+        const auto best_candidate = solve_rune_pose(config, observable.intrinsic, observable.distortion,
+                                                    observable.camera_to_world, icons, bullseyes);
         if (!best_candidate)
             return false;
 
@@ -322,7 +324,8 @@ struct RuneModel::Impl
 
     // 校正：更新投影与板位时限 → 类型约束关联 → 顺序 EKF 更新 → 用真实校正样本拟合。
 
-    auto correct(std::span<const auto_buff::RuneIcon> icons, std::span<const auto_buff::RuneBullseye> bullseyes) noexcept -> bool
+    auto correct(std::span<const auto_buff::RuneIcon> icons,
+                 std::span<const auto_buff::RuneBullseye> bullseyes) noexcept -> bool
     {
 
         observable.update(context.posteriors_state);
@@ -493,8 +496,8 @@ struct RuneModel::Impl
             const auto now = std::chrono::steady_clock::now();
             if (log_time == std::chrono::steady_clock::time_point{} || now - log_time >= std::chrono::seconds(5))
             {
-                constexpr std::array reasons{"cov_x", "cov_y", "range_x", "range_y", "range_z", "speed",
-                                             "face_angle", "state_nan", "state_nonfinite"};
+                constexpr std::array reasons{"cov_x", "cov_y",      "range_x",   "range_y",        "range_z",
+                                             "speed", "face_angle", "state_nan", "state_nonfinite"};
                 const auto failed = std::ranges::find(checks, true) - checks.begin();
                 MAS_LOG_WARN("Rune diverged: reason={}, state=[{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f}], "
                              "cov_diag=[{:.4f},{:.4f},{:.4f},{:.4f},{:.4f},{:.4f}], face_angle={:.4f}, update_count={}",
@@ -511,8 +514,7 @@ struct RuneModel::Impl
 
 // 对外接口只转发到模型实现，保持 EKF 与关联缓存的唯一所有权。
 
-RuneModel::RuneModel(const Config &cfg) noexcept : pimpl{std::make_unique<Impl>(cfg)}
-{}
+RuneModel::RuneModel(const RuneConfig &cfg) noexcept : pimpl{std::make_unique<Impl>(cfg)} {}
 
 RuneModel::~RuneModel() noexcept = default;
 
@@ -537,7 +539,8 @@ auto RuneModel::predict(double dt, rm_utils::Timestamp now) noexcept -> void
     pimpl->predict(dt, now);
 }
 
-auto RuneModel::correct(std::span<const auto_buff::RuneIcon> icons, std::span<const auto_buff::RuneBullseye> bullseyes) noexcept -> bool
+auto RuneModel::correct(std::span<const auto_buff::RuneIcon> icons,
+                        std::span<const auto_buff::RuneBullseye> bullseyes) noexcept -> bool
 {
     return pimpl->correct(icons, bullseyes);
 }
@@ -547,12 +550,12 @@ auto RuneModel::diverged() const -> bool
     return pimpl->diverged();
 }
 
-auto RuneModel::state() const noexcept -> State
+auto RuneModel::state() const noexcept -> RuneState
 {
     return pimpl->context.get_state(pimpl->blade_inactive, pimpl->init_timestamp);
 }
 
-auto RuneModel::addition() const -> const Addition &
+auto RuneModel::addition() const -> const RuneAddition &
 {
     return pimpl->addition;
 }
@@ -562,7 +565,7 @@ auto RuneModel::ekf_snapshot() const noexcept -> RuneEkfSnapshot
     RuneEkfSnapshot result;
     for (int i = 0; i < 6; ++i)
     {
-        result.state[i] = pimpl->context.posteriors_state[i];
+        result.state[i]    = pimpl->context.posteriors_state[i];
         result.variance[i] = pimpl->context.posteriors_covariance(i, i);
     }
     return result;

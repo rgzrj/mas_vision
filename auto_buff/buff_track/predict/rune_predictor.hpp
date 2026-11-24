@@ -2,10 +2,13 @@
 
 #include "auto_buff/buff_track/buff_state.hpp"
 #include "rm_utils/algorithm/buff/rune_energy_fitter.hpp"
-#include <opencv2/core.hpp>
-#include <Eigen/Geometry>
 
-namespace auto_buff {
+#include <Eigen/Geometry>
+#include <opencv2/core.hpp>
+#include <vector>
+
+namespace auto_buff
+{
 
 // 只保存拟合样本窗口；恒速/正弦的数值拟合位于 rm_utils/algorithm。
 class RunePredictor
@@ -22,8 +25,8 @@ public:
      * @param rotation_angle EKF 当前连续转角，单位弧度。
      * @param prediction 接收拟合参数及采样计数；不是另一个 EKF 状态。
      */
-    void correct(int pending_count, int active_count, rm_utils::Timestamp stamp, double elapsed_seconds, double rotation_angle,
-                 RunePrediction &prediction);
+    void correct(int pending_count, int active_count, rm_utils::Timestamp stamp, double elapsed_seconds,
+                 double rotation_angle, RunePrediction &prediction);
 
 private:
     rm_utils::RuneEnergyFitter fitter_;

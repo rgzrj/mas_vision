@@ -52,6 +52,7 @@ int main()
         std::ofstream(config_path) << "auto_buff:\n  track: {debug: true}\n  shoot: {debug: true}\n";
         auto_buff::TraditionalDetector detector(tests::traditional_config("red", YAML::Load("debug: true")), YAML::LoadFile(camera.string()));
         const auto observation = tests::detect(detector, blank, 0);
+        detector.draw(observation);
         auto_buff::RmcsTracker tracker(config_path, camera);
         const auto tracking = tracker.update(observation, 0, blank);
         auto_buff::RuneShooter shooter(config_path);

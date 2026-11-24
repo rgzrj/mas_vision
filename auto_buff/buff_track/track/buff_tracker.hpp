@@ -1,7 +1,7 @@
 #pragma once
 #include "auto_buff/buff_detect/buff_detector.hpp"
+#include "auto_buff/buff_track/buff_state.hpp"
 #include "auto_buff/debug/visualize/track_debug.hpp"
-#include "rune_model.hpp"
 #include "../pose/rune_camera.hpp"
 
 #include <Eigen/Geometry>
@@ -9,33 +9,34 @@
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 #include <yaml-cpp/yaml.h>
 
 namespace auto_buff
 {
+class RuneModel;
+
 // 对外的单帧跟踪结果。像素特征均使用原图坐标，空间状态沿用 RMCS 前/左/上世界系。
 struct TrackResult
 {
-    bool initialized = false;        // 当前是否持有有效模型；不等于已经允许发射。
-    bool observed    = false;        // 本帧是否初始化成功或有观测通过关联和校正。
-    bool ready       = false;        // 预热完成且存在仍有效的待击板。
+    bool initialized = false; // 当前是否持有有效模型；不等于已经允许发射。
+    bool observed    = false; // 本帧是否初始化成功或有观测通过关联和校正。
+    bool ready       = false; // 预热完成且存在仍有效的待击板。
 
     rm_utils::Timestamp timestamp{}; // 当前状态对应的曝光/媒体时刻。
 
-    EnemyColor color    = EnemyColor::UNKNOWN;
+    EnemyColor color   = EnemyColor::UNKNOWN;
     std::string status = "waiting_for_full_mark";
 
     std::vector<Board> geometry_boards; // pose 用本帧灯臂观测反解的板心，单独诊断。
-    auto_buff::RuneModel::State state{};
-    RuneEkfSnapshot ekf;                                            // 当前后验；initialized=false 时不可作为有效状态使用。
-    std::optional<Eigen::Quaterniond> gimbal_orientation;           // 本帧输入的云台到世界姿态，仅供显示。
-    std::vector<auto_buff::RuneModel::Addition::Tracked> predicted; // 本轮校正前的特征投影。
-    std::vector<auto_buff::RuneModel::Addition::Tracked> matched;   // 本帧通过关联的实际像素观测。
-    std::vector<auto_buff::RuneModel::Addition::Tracked> future;    // 指定预测时长后的五个符板中心。
+    RuneState state{};
+    RuneEkfSnapshot ekf;                                  // 当前后验；initialized=false 时不可作为有效状态使用。
+    std::optional<Eigen::Quaterniond> gimbal_orientation; // 本帧输入的云台到世界姿态，仅供显示。
+    std::vector<RuneAddition::Tracked> predicted;         // 本轮校正前的特征投影。
+    std::vector<RuneAddition::Tracked> matched;           // 本帧通过关联的实际像素观测。
+    std::vector<RuneAddition::Tracked> future;            // 指定预测时长后的五个符板中心。
 };
-
-// 当前拟合公式的显示文本。
-std::string rune_motion_text(const TrackResult &track);
 
 // 跟踪子系统的应用入口：组织观测和生命周期，内部复用 RMCS pose / EKF /
 // predict。
@@ -51,6 +52,7 @@ public:
 
     /// 实机/回放入口：读取 track 参数，将相机配置路径交给 pose 内部加载。
     RmcsTracker(const std::filesystem::path &config_path, const std::filesystem::path &camera_config);
+    ~RmcsTracker();
 
     /**
      * @brief 转换公共观测并执行初始化，或 predict → correct → 丢失检查。
@@ -90,10 +92,10 @@ private:
     RuneCamera camera_; // 位姿模块内部读取并持有相机标定，跟踪不再解析相机 YAML。
 
     std::chrono::steady_clock::time_point init_log_time_{}, lost_log_time_{}; // 重建不清零，避免反复失效时刷屏。
-    std::optional<Eigen::Quaterniond> frame_gimbal_orientation_;              // 随下一次 update 消费，避免显示上一帧姿态。
+    std::optional<Eigen::Quaterniond> frame_gimbal_orientation_; // 随下一次 update 消费，避免显示上一帧姿态。
 
-    auto_buff::RuneModel::Config config_;
-    std::unique_ptr<auto_buff::RuneModel> model_;
+    RuneConfig config_;
+    std::unique_ptr<RuneModel> model_;
 
     double last_time_ = -1, corrected_time_ = -1; // 上轮时间 / 最近待击板校正时间，单位秒。
     double timeout_ = 1.5, horizon_ = .1;         // 丢失重置门限 / 未来投影时长，单位秒。

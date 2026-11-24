@@ -269,6 +269,21 @@ int main()
         const auto r       = icons.front().center;
         const double error = (projection.projected[0] - Eigen::Vector2d(r.x, r.y)).norm();
         require(error < 1, "PnP R reprojection error exceeds one pixel");
+        // 检测端四端点的排列应统一还原为同一物理点序。
+        const auto corners = boards.front().corners;
+        std::array order{0, 1, 2, 3};
+        do
+        {
+            for (std::size_t i = 0; i < order.size(); ++i)
+                boards.front().corners[i] = corners[order[i]];
+
+            const auto reordered = auto_buff::solve_rune_pose({}, intrinsic, distortion, camera_transform, icons, boards);
+            require(reordered && (reordered->center_odom - pose->center_odom).norm() < 1e-6 &&
+                        std::abs(rm_utils::limit_rad(reordered->rotation_angle - pose->rotation_angle)) < 1e-6,
+                    "Corner permutation changed the PnP solution");
+        } while (std::next_permutation(order.begin(), order.end()));
+        boards.front().corners = corners;
+
         icons.insert(icons.begin(), auto_buff::RuneIcon{cv::Point2d(80, 60), 2});
         const auto multiple = auto_buff::solve_rune_pose({}, intrinsic, distortion, camera_transform, icons, boards);
         require(multiple && (multiple->center_odom - Eigen::Vector3d(5, 0, 0)).norm() < .05,

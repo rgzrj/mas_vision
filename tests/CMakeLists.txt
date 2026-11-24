@@ -50,6 +50,12 @@ add_test(NAME armor_plotter_test COMMAND armor_plotter_test)
 set_tests_properties(armor_plotter_test PROPERTIES RUN_SERIAL TRUE SKIP_RETURN_CODE 77)
 
 # auto_buff 模块回归。
+add_executable(inference_wait_test auto_buff/inference_wait_test.cpp
+    ${VISION_SOURCE_DIR}/auto_buff/buff_detect/yolo/inference/inference.cpp)
+vision_target_options(inference_wait_test)
+target_link_libraries(inference_wait_test PRIVATE buff_utils Eigen3::Eigen opencv_imgproc ${BUFF_YAML_TARGET})
+add_test(NAME inference_wait_test COMMAND inference_wait_test)
+
 add_executable(buff_detect_test auto_buff/detect_test.cpp auto_buff/traditional_check.cpp auto_buff/yolo_check.cpp)
 vision_target_options(buff_detect_test)
 target_compile_definitions(buff_detect_test PRIVATE BUFF_PROJECT_DIR="${PROJECT_SOURCE_DIR}")
@@ -145,7 +151,7 @@ vision_target_options(frame_pool_test)
 target_link_libraries(frame_pool_test PRIVATE hardware_common buff_utils)
 add_test(NAME frame_pool_test COMMAND frame_pool_test)
 
-add_executable(vision_routing_test hardware/vision_routing_test.cpp)
+add_executable(vision_routing_test threads/vision_routing_test.cpp)
 vision_target_options(vision_routing_test)
 target_link_libraries(vision_routing_test PRIVATE hardware_common Eigen3::Eigen Threads::Threads)
 add_test(NAME vision_routing_test COMMAND vision_routing_test)

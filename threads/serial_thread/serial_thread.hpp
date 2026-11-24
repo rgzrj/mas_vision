@@ -6,10 +6,12 @@ extern std::atomic<bool> g_shutdown;
 
 namespace threads
 {
+class VisionCommand;
+
 /**
  * @brief 串口处理线程入口函数
  */
-void serial_thread_func();
+void serial_thread_func(VisionCommand &commands);
 
 } // namespace threads
 

@@ -1,29 +1,27 @@
 #pragma once
 
 #include "auto_buff/buff_track/buff_state.hpp"
-#include "rm_utils/pimpl.hpp"
 
-#include <array>
+#include <Eigen/Geometry>
+#include <memory>
 #include <span>
-#include <vector>
 
-namespace auto_buff {
+namespace auto_buff
+{
 
 // RMCS 六维 EKF 模型：持有滤波、板位有效期及拟合上下文，不依赖检测器或串口。
 class RuneModel
 {
-    RMCS_PIMPL_DEFINITION(RuneModel)
-
 public:
-    using State    = RuneState;
-    using Config   = RuneConfig;
-    using Addition = RuneAddition;
-
     /**
      * @brief 创建尚未初始化的模型，并设置过程噪声和初始协方差。
      * @param config RMCS 原版模型及初始化门限。
      */
-    explicit RuneModel(const Config &config) noexcept;
+    explicit RuneModel(const RuneConfig &config) noexcept;
+    ~RuneModel() noexcept;
+
+    RuneModel(const RuneModel &)            = delete;
+    RuneModel &operator=(const RuneModel &) = delete;
 
     /// 设置原图内参（行主序 3×3）和五项畸变，不改变当前滤波状态。
     auto update_camera(const cv::Mat &matrix, const cv::Mat &distortion) noexcept -> void;
@@ -37,8 +35,8 @@ public:
      * @param timestamp 本帧曝光时刻，也是该模型预热计时的起点。
      * @return 几何初始化成功返回 true；失败时由外层继续等待观测。
      */
-    auto init(std::span<const auto_buff::RuneIcon> icons, std::span<const auto_buff::RuneBullseye> bullseyes, rm_utils::Timestamp timestamp) noexcept
-        -> bool;
+    auto init(std::span<const auto_buff::RuneIcon> icons, std::span<const auto_buff::RuneBullseye> bullseyes,
+              rm_utils::Timestamp timestamp) noexcept -> bool;
     /**
      * @brief 按恒角速度推进 EKF 状态和协方差，并刷新投影及正弦相位。
      * @param dt 距上一帧的时间间隔，单位秒。
@@ -52,18 +50,22 @@ public:
      * @return 至少一个待击板完成校正时为 true；仅 R 或圆环校正仍返回 false。
      * @note 返回值用于外层丢失计时；空观测只清空匹配，不产生拟合样本。
      */
-    [[nodiscard]] auto correct(std::span<const auto_buff::RuneIcon> icons, std::span<const auto_buff::RuneBullseye> bullseyes) noexcept
-        -> bool;
+    [[nodiscard]] auto correct(std::span<const auto_buff::RuneIcon> icons,
+                               std::span<const auto_buff::RuneBullseye> bullseyes) noexcept -> bool;
 
     /// 检查状态、协方差、空间范围及符面朝向是否发散。
     auto diverged() const -> bool;
 
     /// 导出状态副本，角速度优先取正弦拟合、其次恒速拟合、最后 EKF。
-    auto state() const noexcept -> State;
+    auto state() const noexcept -> RuneState;
     /// 原始 EKF 后验及 P 对角项，只读导出，不使用运动拟合结果替代。
     auto ekf_snapshot() const noexcept -> RuneEkfSnapshot;
     /// 返回模型持有的本帧关联观测和校正前投影，不复制缓存。
-    auto addition() const -> const Addition &;
+    auto addition() const -> const RuneAddition &;
+
+private:
+    struct Impl;
+    std::unique_ptr<Impl> pimpl;
 };
 
-}
+} // namespace auto_buff

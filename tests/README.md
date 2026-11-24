@@ -6,8 +6,8 @@
 |---|---|
 | auto_aim/ | 装甲板检测、位姿、业务绘制与自瞄回放 |
 | auto_buff/ | 传统/YOLO 检测、推理队列、位姿、跟踪、预测、火控和调试输出 |
-| hardware/ | 包布局、CRC、串口状态、命令有效期和帧池 |
-| threads/ | 路由、模式切换、帧有效期和进程级 OpenCV 线程设置 |
+| hardware/ | 包布局、CRC、串口状态和帧池 |
+| threads/ | 路由、模式切换、指令与帧有效期和进程级 OpenCV 线程设置 |
 | rm_utils/display/ | 显示生命周期、图元、事件、RRD 曲线清理与读回 |
 | rm_utils/io/ | 帧元数据格式与错误输入 |
 | rm_utils/plotter_test.cpp | UDP 数据发送与错误恢复 |

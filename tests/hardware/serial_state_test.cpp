@@ -66,31 +66,36 @@ int main()
         feed(serial, 4);
         require(serial.getVisionMode() == BIG_RUNE_RED && serial.isQuaternionValid(),
                 "Full pose queue blocked mode or freshness update");
-        auto state = serial.getVisionState();
-        require(serial.submitVision(state, std::chrono::steady_clock::now(), std::chrono::milliseconds(10),
-                                    {true, .1f, .2f, 1}),
-                "Valid command rejected");
-        serial.sendPacketToSerial();
+        const auto state = serial.getVisionState();
+        serial.sendPacketToSerial({true, .1f, .2f, 1});
         require(serial::Serial::sent.size() == 13 && serial::Serial::sent[1] == 1, "13-byte found packet changed");
-        std::this_thread::sleep_for(std::chrono::milliseconds(20));
-        feed(serial, 4);
-        serial.sendPacketToSerial();
+        const auto crc = hardware::checksum(serial::Serial::sent.data(), serial::Serial::sent.size() - 2);
+        require(serial::Serial::sent[11] == std::uint8_t(crc) && serial::Serial::sent[12] == std::uint8_t(crc >> 8),
+                "Send packet checksum changed");
+        serial.sendPacketToSerial({false, .1f, .2f, 0});
         require(serial::Serial::sent[1] == 0 && serial::Serial::sent[10] == 0,
-                "Expired command still sent with fresh IMU");
+                "Inactive packet flags changed");
+
+        feed(serial, 4);
+        require(serial.getVisionState().epoch == state.epoch, "Repeated mode changed its epoch");
         feed(serial, 2);
-        require(!serial.submitVision(state, std::chrono::steady_clock::now(), std::chrono::milliseconds(100),
-                                     {true, 2, 2, 1}),
-                "Old pipeline overwrote switched command");
+        feed(serial, 4);
+        const auto switched = serial.getVisionState();
+        require(switched.mode == state.mode && switched.epoch == state.epoch + 2,
+                "A->B->A lost a mode transition");
         serial.pollPose();
         require(!serial.poseAt(left_time), "Bounded pose history retained samples beyond its capacity");
         serial.reconnect();
+        const auto reconnected = serial.getVisionState();
+        require(reconnected.mode == switched.mode && reconnected.epoch == switched.epoch + 1,
+                "Reconnect did not invalidate the previous mode version");
         feed(serial, 2);
         require(!serial.poseAt(right_time), "Reconnect retained a pose from the previous session");
         feed(serial, 3);
         require(serial.getVisionMode() == SMALL_RUNE_BLUE, "Pose consumer failed to recover after a full queue");
         serial.closeSerial();
         std::filesystem::remove(config);
-        std::cout << "Production serial parser: full queue, mode switch and command expiry passed\n";
+        std::cout << "Production serial parser: full queue, mode versions, reconnect and packet encoding passed\n";
         return 0;
     }
     catch (const std::exception &e)

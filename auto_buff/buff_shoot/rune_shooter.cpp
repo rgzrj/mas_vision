@@ -15,11 +15,10 @@ using namespace auto_buff;
 namespace
 {
 // 火控参数在模块内读取；偏置在 Impl 初始化时统一从度转换为弧度。
-RuneShooter::Config load_shoot_config(const std::filesystem::path &path)
+RuneShooter::Config load_shoot_config(const YAML::Node &settings)
 {
-    const auto settings = YAML::LoadFile(path.string())["auto_buff"]["shoot"];
     RuneShooter::Config config;
-    
+
     config.bullet_speed        = settings["bullet_speed"].as<double>(config.bullet_speed);
     config.fire_delay_time     = settings["fire_delay_time"].as<double>(config.fire_delay_time);
     config.gravity             = settings["gravity"].as<double>(config.gravity);
@@ -49,8 +48,8 @@ struct RuneShooter::Impl
             throw std::runtime_error("shoot.bullet_speed must be finite and positive");
         if (!std::isfinite(config.fire_delay_time) || config.fire_delay_time < 0.0)
             throw std::runtime_error("shoot.fire_delay_time must be finite and nonnegative");
-        if (!std::isfinite(config.gravity) || config.gravity <= 0.0 ||
-            !std::isfinite(config.resistance) || config.resistance < 0.0)    
+        if (!std::isfinite(config.gravity) || config.gravity <= 0.0 || !std::isfinite(config.resistance) ||
+            config.resistance < 0.0)
             throw std::runtime_error("shoot.gravity must be finite and positive");
         if (!std::isfinite(config.offset_yaw) || !std::isfinite(config.offset_pitch))
             throw std::runtime_error("shoot angle offsets must be finite");
@@ -141,9 +140,8 @@ struct RuneShooter::Impl
                 target_point = auto_buff::AimPoint{attack};
             }
 
-            const auto trajectory =
-                rm_utils::Trajectory(config.bullet_speed, attack.head<2>().norm(), attack.z(), 
-                                        config.gravity, config.resistance, config.max_pitch);
+            const auto trajectory = rm_utils::Trajectory(config.bullet_speed, attack.head<2>().norm(), attack.z(),
+                                                         config.gravity, config.resistance, config.max_pitch);
             if (trajectory.unsolvable)
                 return std::nullopt;
 
@@ -183,9 +181,12 @@ struct RuneShooter::Impl
 
 RuneShooter::RuneShooter(const Config &config) : pimpl{std::make_unique<Impl>(config)} {}
 
-RuneShooter::RuneShooter(const std::filesystem::path &config_path) : RuneShooter(load_shoot_config(config_path))
+RuneShooter::RuneShooter(const std::filesystem::path &config_path)
 {
-    pimpl->shoot_debug.set_enabled(YAML::LoadFile(config_path.string())["auto_buff"]["shoot"]["debug"].as<bool>(false));
+    const auto settings = YAML::LoadFile(config_path.string())["auto_buff"]["shoot"];
+
+    pimpl = std::make_unique<Impl>(load_shoot_config(settings));
+    pimpl->shoot_debug.set_enabled(settings["debug"].as<bool>(false));
 }
 
 void RuneShooter::disable_debug() noexcept
@@ -221,6 +222,7 @@ auto RuneShooter::shoot(const auto_buff::TrackResult &track, const cv::Mat &imag
         aimed = aim(track.state, track.timestamp);
     else
         reset();
+
     pimpl->shoot_debug.draw(track, aimed, image);
     return aimed;
 }

@@ -9,8 +9,10 @@ vision_target_options(rm_utils)
 target_include_directories(rm_utils PUBLIC
     "${CMAKE_CURRENT_SOURCE_DIR}/algorithm"
     ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(rm_utils PUBLIC buff_options Eigen3::Eigen ${OpenCV_LIBS})
+target_link_libraries(rm_utils
+    PUBLIC buff_options Eigen3::Eigen opencv_core
+    PRIVATE opencv_calib3d)
+
 add_subdirectory(io)
 add_subdirectory(display)
-
 add_subdirectory(plotter)

@@ -10,11 +10,11 @@
 #include <limits>
 #include <ranges>
 
-using namespace rm_utils;
-using namespace auto_buff;
-using namespace rm_utils::util;
+namespace auto_buff
+{
 
-namespace {
+namespace
+{
 // 单次初始化的临时求解器；候选遍历结束后不保留几何求解状态。
 struct PoseSolver
 {
@@ -53,113 +53,12 @@ struct PoseSolver
         double inactive_center_sse = std::numeric_limits<double>::max();
     };
 
-    /**
-     * @brief 根据 R 标位置重排四端点，得到 R 标、上/左/下/右端点的物理点序。
-     * @param icon 被选中的 R 标
-     * @param bullseye 被选中的种子板
-     * @return 退化、重复或无法区分两侧端点时为空；不使用检测框角点补齐。
-     */
-    static auto make_seed_image_points(const auto_buff::RuneIcon &icon, const auto_buff::RuneBullseye &bullseye)
-        -> std::optional<std::array<cv::Point2f, 5>>
-    {
-        constexpr auto kEps = 1e-6;
-
-        const auto icon_point   = cv::Point2f(icon.center);
-        const auto center_point = cv::Point2f(bullseye.center);
-
-        auto corners = std::array<cv::Point2f, 4>{};
-        std::ranges::copy(bullseye.corners |
-                              std::views::transform([](const cv::Point2d &point) { return cv::Point2f(point); }),
-                          corners.begin());
-
-        auto index_b      = std::size_t{0};
-        auto index_t      = std::size_t{0};
-        auto min_distance = std::numeric_limits<double>::max();
-        auto max_distance = -std::numeric_limits<double>::max();
-        for (const auto &[index, corner] : corners | std::views::enumerate)
-        {
-            const auto dx       = static_cast<double>(corner.x - icon_point.x);
-            const auto dy       = static_cast<double>(corner.y - icon_point.y);
-            const auto distance = std::hypot(dx, dy);
-
-            if (distance < min_distance)
-            {
-                index_b      = static_cast<std::size_t>(index);
-                min_distance = distance;
-            }
-            if (distance > max_distance)
-            {
-                index_t      = static_cast<std::size_t>(index);
-                max_distance = distance;
-            }
-        }
-        if (index_b == index_t)
-            return std::nullopt;
-
-        auto remaining       = std::array<std::size_t, 2>{};
-        auto remaining_count = std::size_t{0};
-        for (std::size_t index = 0; index < corners.size(); ++index)
-        {
-            if (index == index_b || index == index_t)
-                continue;
-            if (remaining_count >= remaining.size())
-                return std::nullopt;
-
-            remaining[remaining_count] = index;
-            remaining_count++;
-        }
-        if (remaining_count != remaining.size())
-            return std::nullopt;
-
-        const auto b = corners[index_b];
-        const auto t = corners[index_t];
-
-        auto l = cv::Point2f{};
-        auto r = cv::Point2f{};
-        {
-            const auto z_axis_raw = t - b;
-            const auto z_axis_len = std::hypot(static_cast<double>(z_axis_raw.x), static_cast<double>(z_axis_raw.y));
-            if (z_axis_len <= kEps)
-                return std::nullopt;
-
-            const auto z_axis = cv::Point2d{
-                static_cast<double>(z_axis_raw.x) / z_axis_len,
-                static_cast<double>(z_axis_raw.y) / z_axis_len,
-            };
-            const auto y_axis = cv::Point2d{z_axis.y, -z_axis.x};
-
-            const auto first  = corners[remaining[0]];
-            const auto second = corners[remaining[1]];
-
-            const auto first_projection = static_cast<double>(first.x - center_point.x) * y_axis.x +
-                                          static_cast<double>(first.y - center_point.y) * y_axis.y;
-            const auto second_projection = static_cast<double>(second.x - center_point.x) * y_axis.x +
-                                           static_cast<double>(second.y - center_point.y) * y_axis.y;
-            if (std::abs(first_projection - second_projection) <= kEps)
-                return std::nullopt;
-
-            if (first_projection > second_projection)
-            {
-                l = first;
-                r = second;
-            }
-            else
-            {
-                l = second;
-                r = first;
-            }
-        }
-
-        return std::array<cv::Point2f, 5>{icon_point, t, l, b, r};
-    }
-
     // 用完整五点重新投影，返回误差平方和与最大像素误差，避免只信任 PnP 成功标志。
-    auto evaluate_seed_reprojection(const auto_buff::RuneIcon &icon, const auto_buff::RuneBullseye &bullseye,
-                                    const Eigen::Vector3d &t_camera_rune, const Eigen::Quaterniond &q_camera_rune) const
+    auto evaluate_seed_reprojection(const SingleRunePnpSolution::Input &input, const Eigen::Vector3d &t_camera_rune,
+                                    const Eigen::Quaterniond &q_camera_rune) const
         -> std::optional<std::pair<double, double>>
     {
-
-        const auto image_points_opt = make_seed_image_points(icon, bullseye);
+        const auto image_points_opt = input.image_points();
         if (!image_points_opt)
             return std::nullopt;
 
@@ -167,7 +66,7 @@ struct PoseSolver
         const auto translation_opencv = rm_utils::util::ros2opencv_position(t_camera_rune);
 
         auto camera_points = std::array<cv::Point3f, 5>{};
-        for (const auto &[index, point] : auto_buff::RunePagePoints::kPoints | std::views::enumerate)
+        for (const auto &[index, point] : RunePagePoints::kPoints | std::views::enumerate)
         {
             const auto p_local_ros                         = point;
             const auto p_local_ocv                         = rm_utils::util::ros2opencv_position(p_local_ros);
@@ -179,14 +78,13 @@ struct PoseSolver
             };
         }
 
-        const auto projected_points = reproject_points(camera_points, intrinsic, distortion);
+        const auto projected_points = rm_utils::util::reproject_points(camera_points, intrinsic, distortion);
         if (projected_points.size() != image_points_opt->size())
             return std::nullopt;
 
         auto sse       = 0.0;
         auto max_error = 0.0;
-        for (const auto &[projected, detected] :
-             std::views::zip(projected_points, *image_points_opt))
+        for (const auto &[projected, detected] : std::views::zip(projected_points, *image_points_opt))
         {
             const auto dx   = static_cast<double>(projected.x - detected.x);
             const auto dy   = static_cast<double>(projected.y - detected.y);
@@ -199,12 +97,11 @@ struct PoseSolver
 
     // 将解降为当前模型的中心、符面偏航和转角，验证种子板心并统计其他待击板的支持。
     // 后续 EKF 采用相同投影模型，故初始化不能只满足一个任意六自由度 PnP 解。
-    auto evaluate_reduced_layout(const auto_buff::RuneIcon &icon, const auto_buff::RuneBullseye &seed,
-                                 std::span<const auto_buff::RuneBullseye> other_inactive_bullseyes,
+    auto evaluate_reduced_layout(const RuneIcon &icon, const RuneBullseye &seed,
+                                 std::span<const RuneBullseye> other_inactive_bullseyes,
                                  const Eigen::Vector3d &center_odom, double face_yaw_odom, double rotation_angle) const
         -> std::optional<InitLayoutScore>
     {
-
         auto simulated    = observable;
         StateVector state = StateVector::Zero();
         state[kX]         = center_odom.x();
@@ -266,24 +163,23 @@ struct PoseSolver
     }
 
     // 先求相机系 PnP，再转世界系；依次检查五点误差、符面俯仰、法线朝向和整体布局。
-    auto make_init_candidate(const auto_buff::RuneIcon &icon, const auto_buff::RuneBullseye &seed,
-                             std::span<const auto_buff::RuneBullseye> other_inactive_bullseyes) const
+    auto make_init_candidate(const RuneIcon &icon, const RuneBullseye &seed,
+                             std::span<const RuneBullseye> other_inactive_bullseyes) const
         -> std::optional<InitCandidate>
     {
-
-        auto pnp          = SingleRunePnpSolution{};
-        pnp.input.intrinsic = intrinsic;
+        auto pnp             = SingleRunePnpSolution{};
+        pnp.input.intrinsic  = intrinsic;
         pnp.input.distortion = distortion;
-        pnp.input.center  = seed.center;
-        pnp.input.icon    = icon.center;
-        pnp.input.corners = seed.corners;
+        pnp.input.center     = seed.center;
+        pnp.input.icon       = icon.center;
+        pnp.input.corners    = seed.corners;
         if (!pnp.solve())
             return std::nullopt;
 
         const auto t_camera_rune = pnp.result.translation;
         const auto q_camera_rune = pnp.result.orientation.normalized();
 
-        const auto seed_error = evaluate_seed_reprojection(icon, seed, t_camera_rune, q_camera_rune);
+        const auto seed_error = evaluate_seed_reprojection(pnp.input, t_camera_rune, q_camera_rune);
         if (!seed_error)
             return std::nullopt;
 
@@ -365,13 +261,13 @@ struct PoseSolver
     }
 
     // 遍历所有 R 和最多两个待击板种子。打击后圆环可用于后续校正，不作为初始 PnP 种子。
-    auto solve(std::span<const auto_buff::RuneIcon> icons, std::span<const auto_buff::RuneBullseye> bullseyes) const
+    auto solve(std::span<const RuneIcon> icons, std::span<const RuneBullseye> bullseyes) const
         -> std::optional<RunePose>
     {
         if (icons.empty())
             return std::nullopt;
 
-        auto inactive_bullseyes = std::vector<const auto_buff::RuneBullseye *>{};
+        auto inactive_bullseyes = std::vector<const RuneBullseye *>{};
         for (const auto &bullseye : bullseyes)
         {
             if (!bullseye.active)
@@ -391,7 +287,7 @@ struct PoseSolver
                 if (!seed)
                     continue;
 
-                auto other_inactive_storage = std::array<auto_buff::RuneBullseye, 1>{};
+                auto other_inactive_storage = std::array<RuneBullseye, 1>{};
                 auto other_inactive_count   = std::size_t{0};
                 for (const auto *item : inactive_bullseyes)
                 {
@@ -403,7 +299,7 @@ struct PoseSolver
                     other_inactive_storage[other_inactive_count] = *item;
                     other_inactive_count++;
                 }
-                const auto other_inactive = std::span<const auto_buff::RuneBullseye>{
+                const auto other_inactive = std::span<const RuneBullseye>{
                     other_inactive_storage.data(),
                     other_inactive_count,
                 };
@@ -429,12 +325,15 @@ struct PoseSolver
 };
 } // namespace
 
-auto auto_buff::solve_rune_pose(const RuneConfig &config, const cv::Mat &intrinsic, const cv::Mat &distortion, const Eigen::Isometry3d &camera_transform, std::span<const auto_buff::RuneIcon> icons,
-                           std::span<const auto_buff::RuneBullseye> bullseyes) -> std::optional<RunePose>
+auto solve_rune_pose(const RuneConfig &config, const cv::Mat &intrinsic, const cv::Mat &distortion,
+                     const Eigen::Isometry3d &camera_transform, std::span<const RuneIcon> icons,
+                     std::span<const RuneBullseye> bullseyes) -> std::optional<RunePose>
 {
-    auto solver = PoseSolver{config, intrinsic, distortion, camera_transform, {}};
-    solver.observable.intrinsic = intrinsic;
-    solver.observable.distortion = distortion;
+    auto solver                       = PoseSolver{config, intrinsic, distortion, camera_transform, {}};
+    solver.observable.intrinsic       = intrinsic;
+    solver.observable.distortion      = distortion;
     solver.observable.camera_to_world = camera_transform;
     return solver.solve(icons, bullseyes);
 }
+
+} // namespace auto_buff

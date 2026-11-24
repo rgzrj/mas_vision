@@ -170,6 +170,28 @@ void check_pipeline(const fs::path &root)
     detector.BuffDetector_Set_Color(auto_buff::EnemyColor::BLUE);
     const auto blue = tests::detect(detector, frame.image, 1, frame.mode);
     require(blue.boards.empty() && blue.light_arms.empty(), "Per-frame color filtering omitted the light-arm branch");
+
+    struct WaitingDetector : FrameDetector
+    {
+        std::optional<Detection> collect_impl() override { return std::nullopt; }
+    };
+    modules.detector = std::make_unique<WaitingDetector>();
+    g_shutdown = true;
+    const auto interrupted = app::process_buff_frame(modules, frame);
+    g_shutdown = false;
+    require(!interrupted.initialized && interrupted.status == "interrupted",
+            "Replay ignored shutdown while waiting for a detection");
+}
+
+void check_mode_color_policy()
+{
+    for (const std::string initial : {"red", "blue"})
+        for (int mode : {0, 1, 2, 3, 4, 5, 5, 4, 2, 3, 2, 0, 2, 1, 2})
+        {
+            const auto expected = mode % 2 == 0 ? initial : std::string("blue");
+            require(app::replay_color(mode, initial) == expected,
+                    "Replay mode color differs from the live YAML color policy");
+        }
 }
 
 void check_mode_colors(const fs::path &root)
@@ -291,6 +313,7 @@ int main()
     try
     {
         fs::create_directory(root);
+        check_mode_color_policy();
         check_pipeline(root);
         check_mode_colors(root);
         check_media();

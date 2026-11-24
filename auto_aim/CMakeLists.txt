@@ -18,7 +18,9 @@ target_include_directories(auto_aim PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/armor_detector
     ${CMAKE_CURRENT_SOURCE_DIR}/armor_track
     ${CMAKE_CURRENT_SOURCE_DIR}/armor_shoot)
-target_link_libraries(auto_aim PUBLIC rm_utils buff_utils rm_plotter buff_display PRIVATE ${BUFF_YAML_TARGET})
+target_link_libraries(auto_aim
+    PUBLIC rm_utils buff_utils rm_plotter buff_display opencv_dnn
+    PRIVATE opencv_imgproc opencv_calib3d ${BUFF_YAML_TARGET})
 set(armor_layout_header "#pragma once\n#include <array>\n#include <span>\nnamespace auto_aim {\n")
 set(armor_layout_entries "std::span<const unsigned char>{},")
 foreach(mask RANGE 1 15)

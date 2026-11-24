@@ -1,6 +1,12 @@
 #include "rune_predictor.hpp"
+#include "rm_utils/algorithm/conversion.hpp"
+#include "rm_utils/algorithm/reprojection.hpp"
 
-namespace auto_buff {
+#include <cmath>
+#include <numbers>
+
+namespace auto_buff
+{
 
 void RunePredictor::reset()
 {
@@ -8,15 +14,16 @@ void RunePredictor::reset()
     force_sine_until_ = rm_utils::Timestamp{};
 }
 
-void RunePredictor::correct(int inactive_corrected, int active_corrected, rm_utils::Timestamp current_stamp, double t_now,
+void RunePredictor::correct(int pending_count, int active_count, rm_utils::Timestamp current_stamp, double t_now,
                             double rotation_angle, RunePrediction &prediction)
 {
     constexpr double kFitWarmupSeconds = 1.0;
+
     // 同帧匹配多个待击板时，沿用上游三秒正弦模型优先窗口。
-    if (inactive_corrected > 1)
+    if (pending_count > 1)
         force_sine_until_ = current_stamp + std::chrono::seconds{3};
 
-    if (inactive_corrected > 0 || active_corrected > 0)
+    if (pending_count > 0 || active_count > 0)
     {
         prediction.update_count += 1;
 
@@ -52,6 +59,35 @@ void RunePredictor::correct(int inactive_corrected, int active_corrected, rm_uti
             }
         }
     }
+}
+
+auto predict_rune_features(const RuneState &state, double seconds, const cv::Mat &intrinsic, const cv::Mat &distortion,
+                           const Eigen::Isometry3d &transform) -> std::vector<RuneAddition::Tracked>
+{
+    // 修改状态副本，不能影响 tracker 正在使用的当前状态。
+    auto future = state;
+    future.transition(seconds);
+
+    auto result     = std::vector<RuneAddition::Tracked>{};
+    const auto face = Eigen::AngleAxisd(future.face_yaw, Eigen::Vector3d::UnitZ());
+    const auto q    = Eigen::Quaterniond(transform.rotation());
+    const auto t    = Eigen::Vector3d(transform.translation());
+
+    for (int slot = 0; slot < 5; ++slot)
+    {
+        const double angle = future.rotation_angle + slot * 2 * std::numbers::pi / 5;
+        const Eigen::Vector3d local(0, -kRuneGlobalRadius * std::sin(angle), kRuneGlobalRadius * std::cos(angle));
+        const Eigen::Vector3d world     = Eigen::Vector3d(future.x, future.y, future.z) + face * local;
+        const Eigen::Vector3d in_camera = q.conjugate() * (world - t);
+        const auto ocv                  = rm_utils::util::ros2opencv_position(in_camera);
+
+        if (ocv.z() <= 0.1)
+            continue;
+        if (auto point = rm_utils::util::reproject_point(ocv, intrinsic, distortion))
+            result.push_back({slot + 1, *point});
+    }
+
+    return result;
 }
 
 } // namespace auto_buff

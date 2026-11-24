@@ -44,7 +44,7 @@ public:
 
     // 满槽拒收；成功接收后，图像像素须保持只读直至 pop。
     bool submit(const cv::Mat &image, double seconds, RuneMode mode, EnemyColor color);
-    const Slot *front(); // 仅返回已完成的只读队首，不等待推理。
+    const Slot *front(); // 只读队首；未完成返回空，等待超过 5 秒或设备失败则抛异常并停用。
     void pop();          // front 返回非空且后处理结束后调用。
 
 private:
@@ -67,6 +67,8 @@ private:
     std::size_t capacity_ = 1;
     std::size_t head_     = 0;
     std::size_t pending_  = 0;
+
+    bool failed_ = false; // 设备异常或请求超时后，禁止复用在途资源。
 
     bool tracy_debug_   = false;
     bool reuse_buffers_ = false;

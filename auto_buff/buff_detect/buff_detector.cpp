@@ -28,6 +28,7 @@ std::unique_ptr<BuffDetector> BuffDetector::create(const std::filesystem::path &
 
             return std::make_unique<YoloDetector>(config, config_path.parent_path());
         }
+
         if (backend == "traditional")
         {
             const auto camera = YAML::LoadFile((config_path.parent_path() / "hikcamera.yaml").string());
@@ -65,11 +66,14 @@ std::optional<BuffDetector::Detection> BuffDetector::collect()
 {
     auto result = collect_impl();
     if (result)
-    {
         filter_rune_observations(*result, result->mode, result->color);
-        debug_->draw(*result, result->image);
-    }
+
     return result;
+}
+
+void BuffDetector::draw(const Detection &detection)
+{
+    debug_->draw(detection, detection.image);
 }
 
 void filter_rune_observations(BuffDetector::Detection &detection, RuneMode mode, EnemyColor color)

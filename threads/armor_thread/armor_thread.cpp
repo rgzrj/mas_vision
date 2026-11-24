@@ -1,4 +1,5 @@
 #include "armor_thread.hpp"
+#include "threads/vision_router/vision_command.hpp"
 
 #include "auto_aim/armor_detector/armor_detector.hpp"
 #include "auto_aim/armor_shoot/armor_shoot.hpp"
@@ -14,7 +15,7 @@ extern std::atomic<bool> g_shutdown;
 
 namespace threads
 {
-void armor_thread_func(VisionQueue &queue, const std::filesystem::path &config)
+void armor_thread_func(VisionCommand &commands, VisionQueue &queue, const std::filesystem::path &config)
 {
     MAS_LOG_INFO("Armor processing thread started");
 
@@ -52,7 +53,7 @@ void armor_thread_func(VisionQueue &queue, const std::filesystem::path &config)
         const CameraFrame &frame   = input.camera;
         const auto         max_age = input.max_age;
 
-        if (input.state.epoch != serial.getVisionState().epoch)
+        if (input.state.epoch != commands.state().epoch)
             continue;
 
         // 模式切换后清空上一轮跟踪和火控状态，再设置本帧颜色。
@@ -78,7 +79,7 @@ void armor_thread_func(VisionQueue &queue, const std::filesystem::path &config)
         const auto now = std::chrono::steady_clock::now();
         if (frame.timestamp > now || now - frame.timestamp > max_age)
         {
-            serial.disableVision(input.state);
+            commands.clear(input.state);
             continue;
         }
 
@@ -105,7 +106,7 @@ void armor_thread_func(VisionQueue &queue, const std::filesystem::path &config)
             const auto shoot_result = shooter.shoot(target, frame.timestamp, tracker.armor_pose().Get_R_gimbal2world(),
                                                      std::chrono::steady_clock::now(), frame.frame);
 
-            if (!serial.submitVision(input.state, frame.timestamp, max_age, shoot_result))
+            if (!commands.submit(input.state, frame.timestamp, max_age, shoot_result))
                 continue;
         }
         else
@@ -114,7 +115,7 @@ void armor_thread_func(VisionQueue &queue, const std::filesystem::path &config)
             shooter.reset();
             debug.pose_unavailable(frame.frame);
 
-            if (!serial.disableVision(input.state))
+            if (!commands.clear(input.state))
                 continue;
         }
 

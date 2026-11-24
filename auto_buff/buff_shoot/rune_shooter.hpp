@@ -10,10 +10,6 @@
 namespace auto_buff
 {
 struct TrackResult;
-}
-
-namespace auto_buff
-{
 
 // 仅保留 RMCS FireController 的能量机关路径；装甲板选板逻辑不属于本工程。
 class RuneShooter
@@ -29,7 +25,7 @@ public:
         double fire_delay_time     = 0.080; // 统一发弹延迟，单位：s
         double offset_yaw          = 0.0;   // degree
         double offset_pitch        = 0.0;   // degree
-        double max_pitch           = 80.0;  //degree
+        double max_pitch           = 80.0;  // degree
         double rune_idle_duration  = 0.4;   // s
         double rune_shoot_duration = 0.2;   // s
     };
@@ -50,20 +46,22 @@ public:
         bool idle         = true;  // 当前是否处于 RMCS idle 阶段。
 
         auto_buff::AimPoint target; // 含角度偏置的单位瞄准方向及方向角速度/角加速度前馈。
-        Eigen::Vector3d center;    // 外推时刻的符中心，世界系米。
-        Eigen::Vector3d attack;    // 弹道迭代选中的击打点；无待击板时退回符中心。
+        Eigen::Vector3d center;     // 外推时刻的符中心，世界系米。
+        Eigen::Vector3d attack;     // 弹道迭代选中的击打点；无待击板时退回符中心。
     };
 
     /**
      * @brief 创建 RMCS 打符火控，读取弹速、发令延迟、角度偏置和发弹节奏。
-     * @param config 偏置输入为度，其余时间参数为秒，弹速为 m/s。
+     * @param config 角度输入为度，时间为秒，弹速为 m/s。
      */
     explicit RuneShooter(const Config &config);
+
     /// 实机/回放入口：模块内部读取 shoot 参数。
     explicit RuneShooter(const std::filesystem::path &config_path);
 
-    /// 更新解算时钟；应在同一次 aim 调用之前设置。
+    /// 更新解算时钟；在本次 aim 或 shoot 调用前设置。
     auto update(State state) -> void;
+
     /**
      * @brief 外推待击板并迭代飞行时间，输出目标角和发射建议。
      * @param track 曝光时刻的世界系跟踪状态；内部使用副本外推，不改变 EKF。
@@ -72,6 +70,7 @@ public:
      * @note 此模块只计算，不访问串口或设备。
      */
     auto aim(const RuneState &track, rm_utils::Timestamp track_timestamp) -> std::optional<Aimed>;
+
     /**
      * @brief 根据跟踪结果解算或重置火控；开启调试时在模块内部提交结果。
      * @param track 本帧跟踪结果；未初始化时重置发弹周期。
@@ -79,6 +78,7 @@ public:
     auto shoot(const auto_buff::TrackResult &track, const cv::Mat &image = {}) -> std::optional<Aimed>;
 
     void disable_debug() noexcept;
+
     /// 清空 idle/shoot 周期；模型丢失、换模式或重新初始化时调用。
     auto reset() noexcept -> void;
 };

@@ -9,6 +9,34 @@
 
 namespace auto_buff
 {
+std::string rune_motion_text(const TrackResult &track)
+{
+    if (!track.initialized)
+        return {};
+
+    const auto &state = track.state;
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(2) << std::showpos;
+
+    // 字段及回退顺序沿用 RMCS：正弦拟合 → 恒速拟合 → EKF 当前角度。
+    if (state.sine_valid)
+    {
+        out << "spd_" << std::noshowpos << state.update_count << std::showpos << "(t)=" << state.sine_v << state.sine_a
+            << "*sin(" << state.sine_phase << state.sine_omega << "t)";
+    }
+    else if (state.use_prediction_speed)
+    {
+        out << "spd_" << std::noshowpos << state.update_count << std::showpos << "(t)=" << state.rotation_speed;
+    }
+    else
+    {
+        out << "theta_ekf=" << state.rotation_angle;
+        return out.str();
+    }
+
+    out << ", e=" << std::noshowpos << std::setprecision(3) << state.prediction_cost;
+    return out.str();
+}
 
 void TrackDebug::draw(const TrackResult &result, const cv::Mat &image)
 {

@@ -191,7 +191,6 @@ try
             ? parameters["auto_buff"]["detect"]["common"]["color"].as<std::string>("red")
             : (parameters["auto_aim"]["armor_detector"]["detect_color"].as<std::string>("RED") == "BLUE" ? "blue"
                                                                                                          : "red");
-    std::string color   = local_color;
     int last_mode       = 0;
     std::int64_t frames = 0, tracked = 0, missing_pose = 0, inactive = 0, previous_ns = -1;
     auto previous_start = std::chrono::steady_clock::now();
@@ -246,17 +245,9 @@ try
         if (paired && frame.mode != last_mode)
         {
             reset();
-            if (pipeline == "armor" && (frame.mode == 0 || frame.mode == 1))
-                color = frame.mode == 1 ? "blue" : "red";
-            if (pipeline == "buff")
-            {
-                if (frame.mode == 0)
-                    color = local_color;
-                else if (frame.mode >= 2 && frame.mode <= 5 && ((frame.mode & 1) != (last_mode & 1)))
-                    color = (frame.mode & 1) ? "blue" : "red";
-            }
             last_mode = frame.mode;
         }
+        const auto color = paired ? replay_color(frame.mode, local_color) : local_color;
         const auto exposure =
             std::chrono::steady_clock::time_point(std::chrono::duration_cast<std::chrono::steady_clock::duration>(
                 std::chrono::nanoseconds(frame.timestamp_ns)));

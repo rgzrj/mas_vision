@@ -1,0 +1,4 @@
+interface:
+  display_name: "可读 C++"
+  short_description: "统一模块业务入口，明确封装边界，编写精简、整洁且易读的 C++ 代码"
+  default_prompt: "使用 $readable-cpp 检查当前 C++ 任务的接口、职责和书写风格；按我的请求讨论或修改，保持改动精简且可验证。"

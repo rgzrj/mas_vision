@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "SPSCQueue.h"
-#include "vision_command.hpp"
 #include "serial.h"
 #include "serial_types.hpp"
 
@@ -42,21 +41,9 @@ class UserSerial
      */
     bool isConnectedStatus() const { return isConnected; }
     /*
-     * @brief 发送视觉数据
-     * @param target_yaw 目标 yaw 角度
-     * @param target_pitch 目标 pitch 角度
-     * @param armor_found 目标是否被找到
-     * @param fire_advice 开火建议
+     * @brief 发送调度层给出的数据包；未连接时跳过，不在发送路径重连。
      */
-    void sendVision(float target_yaw = 0.0f, float target_pitch = 0.0f, uint8_t found = 0, uint8_t fire_advice = 0);
-    /** 禁用视觉跟随和开火，保留最后一次目标角度。 */
-    void disableVision();
-    /** 仅当该帧的模式和 epoch 仍有效时，撤销视觉指令。 */
-    bool disableVision(VisionState state);
-    /*
-     * @brief 发送数据包到串口，serial线程调用
-     */
-    void sendPacketToSerial();
+    void sendPacketToSerial(SendPacket packet);
     /*
      * @brief 接收串口数据，serial线程调用
      */
@@ -87,14 +74,13 @@ class UserSerial
      */
     VisionMode getVisionMode() const
     {
-        return commands_.state().mode;
+        return getVisionState().mode;
     }
     VisionState getVisionState() const
     {
-        return commands_.state();
+        std::lock_guard lock(state_mutex_);
+        return state_;
     }
-    bool submitVision(VisionState state, std::chrono::steady_clock::time_point exposure,
-                      std::chrono::steady_clock::duration max_age, SendPacket packet);
     // 仅 router 或独立录制器调用；不能由两个算法线程消费。
     void pollPose();
     std::optional<Eigen::Quaterniond> poseAt(std::chrono::steady_clock::time_point t);
@@ -114,6 +100,7 @@ class UserSerial
 
   private:
     UserSerial(const std::string &config_path = "config/serial_config.yaml");
+    void set_mode(VisionMode mode);
 
     // 只由姿态队列消费者查询；越界或相邻样本间隔过大时返回无值。
     std::optional<Eigen::Quaterniond>
@@ -126,8 +113,9 @@ class UserSerial
     std::chrono::steady_clock::time_point last_reconnect_time_;
     std::atomic<int64_t>                  last_data_receive_ms_{0};
 
-    // 发送数据包
-    VisionCommand commands_;
+    // 接收模式及其版本；每次切换和重连都使旧帧失效。
+    VisionState state_;
+    mutable std::mutex state_mutex_;
 
     // 配置参数
     std::string           port_{"/dev/mascdc"};

@@ -65,5 +65,12 @@ enum VisionMode
     BIG_RUNE_BLUE   = 5,
 };
 
+// 接收模式及其版本，不属于串口线包。
+struct VisionState
+{
+    VisionMode mode     = AUTO_AIM_RED;
+    std::uint64_t epoch = 0;
+};
+
 
 

@@ -46,8 +46,13 @@ int main(int argc, char *argv[])
             const auto start = std::chrono::steady_clock::now();
             if (!detector->submit(frame.image, frame.seconds))
                 throw std::runtime_error("Previous frame was not collected");
-            while (!detector->collect())
+            auto detection = detector->collect();
+            while (!detection)
+            {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                detection = detector->collect();
+            }
+            detector->draw(*detection);
             const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
             std::cout << "detect_ms=" << ms << '\n';
             display.end_frame();

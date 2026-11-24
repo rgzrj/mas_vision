@@ -1,11 +1,13 @@
 #pragma once
 
-#include <opencv2/core.hpp>
-#include <Eigen/Geometry>
 #include <Eigen/Core>
+#include <Eigen/Geometry>
+#include <opencv2/core.hpp>
+
 #include <array>
 
-namespace auto_buff {
+namespace auto_buff
+{
 
 using RuneStateVector      = Eigen::Matrix<double, 6, 1>; // [x,y,z,角速度,转角,符面偏航]，米、秒、弧度。
 inline constexpr auto kX   = 0;
@@ -18,7 +20,8 @@ inline constexpr auto kPsi = 5;
 // 0 为 R，1～5 为符板中心；pose 和 track 使用完全相同的几何投影。
 struct RuneObservable
 {
-    cv::Mat intrinsic, distortion;
+    cv::Mat intrinsic;
+    cv::Mat distortion;
     Eigen::Isometry3d camera_to_world = Eigen::Isometry3d::Identity();
 
     static constexpr int kFeatureIcon  = 0;
@@ -30,8 +33,8 @@ struct RuneObservable
 
     /**
      * @brief 从状态和相机变换刷新 R 与五个符板中心的投影。
-     * @param state 当前六维状态；本函数只刷新投影缓存，不校正或预测状态。
-     *                   [x,y,z,角速度,转角,符面偏航]，米、秒、弧度。
+     * @param state 当前六维状态 [x,y,z,角速度,转角,符面偏航]，单位为米、秒和弧度。
+     * @note 只刷新投影缓存，不校正或预测状态。
      */
     auto update(const RuneStateVector &state) noexcept -> void;
 };
