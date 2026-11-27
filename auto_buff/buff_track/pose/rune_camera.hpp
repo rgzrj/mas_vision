@@ -14,20 +14,21 @@ namespace auto_buff
 class RuneCamera
 {
 public:
-    /// 支持主工程 calibration/handeye_calibration 节点，以及原有平铺离线标定。
+    /// 读取主工程 calibration 和完整 handeye_calibration；实机与离线共用此格式。
     explicit RuneCamera(const std::filesystem::path &config_path);
 
-    const cv::Mat &intrinsic() const
+    const cv::Mat &camera_matrix() const
     {
-        return intrinsic_;
+        return camera_matrix_;
     }
-    const cv::Mat &distortion() const
+    const cv::Mat &distort_coeffs() const
     {
-        return distortion_;
+        return distort_coeffs_;
     }
-    const Eigen::Isometry3d &transform() const
+    // 相机到世界 (odom) 的位姿
+    const Eigen::Isometry3d &camera_to_world() const
     {
-        return transform_;
+        return T_camera2world_;
     }
 
     /**
@@ -35,20 +36,14 @@ public:
      * @return 转换后的云台到世界四元数，供本帧调试显示使用。
      * @note IMU 基变换、光学轴变换和手眼平移均在此处理，输入四元数顺序为 wxyz。
      */
-    Eigen::Quaterniond set_imu_orientation(const Eigen::Quaterniond &orientation);
-
-    /// 配置记录了标定宽高时核对输入；未记录时使用原内参，不自动缩放。
-    void check_image_size(cv::Size size) const;
+    Eigen::Quaterniond set_imu_orientation(const Eigen::Quaterniond &q_imubody2world);
 
 private:
-    cv::Mat intrinsic_;  // 行主序相机内参。
-    cv::Mat distortion_; // k1、k2、p1、p2、k3。
-    cv::Size calibration_size_;
+    cv::Mat camera_matrix_;  // 行主序相机内参。
+    cv::Mat distort_coeffs_; // k1、k2、p1、p2、k3。
 
-    Eigen::Isometry3d transform_        = Eigen::Isometry3d::Identity(); // 当前相机到世界变换。
-    Eigen::Isometry3d camera_to_gimbal_ = Eigen::Isometry3d::Identity(); // 固定手眼外参。
-    Eigen::Quaterniond gimbal_to_imu_   = Eigen::Quaterniond::Identity();
-
-    bool dynamic_calibration_ = false; // 是否具备实时 IMU 所需的完整标定。
+    Eigen::Isometry3d T_camera2world_    = Eigen::Isometry3d::Identity(); // 当前相机到世界变换。
+    Eigen::Isometry3d T_camera2gimbal_   = Eigen::Isometry3d::Identity(); // 内部 FLU 相机到云台的固定变换。
+    Eigen::Quaterniond q_gimbal2imubody_ = Eigen::Quaterniond::Identity();
 };
 } // namespace auto_buff

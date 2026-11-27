@@ -3,7 +3,7 @@
 #include <tracy/TracyC.h>
 #include <tracy/Tracy.hpp>
 
-namespace rm_utils
+namespace auto_buff
 {
 
 // 同一算法线程内汇总一帧；普通计时不依赖 Tracy 是否连接。
@@ -11,7 +11,7 @@ struct YoloTiming
 {
     bool enabled = false;
     double yolo_ms = 0, refine_ms = 0;
-    double preprocess_ms = 0, infer_ms = 0, decode_ms = 0;
+    double preprocess_ms = 0, request_ms = 0, decode_ms = 0;
     unsigned refine_calls = 0;
 };
 inline thread_local YoloTiming yolo_timing;
@@ -59,4 +59,4 @@ class TimedZone
     Clock::time_point start_;
     bool finished_ = false;
 };
-} // namespace rm_utils
+} // namespace auto_buff

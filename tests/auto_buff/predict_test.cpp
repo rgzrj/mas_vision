@@ -7,6 +7,7 @@
 #include <array>
 #include <chrono>
 #include <fstream>
+#include <limits>
 
 namespace {
 void check_robust_sine_fit() {
@@ -66,8 +67,11 @@ void check_robust_sine_fit() {
 void check_tracker_sine_prediction() {
     tests::TemporaryDirectory directory;
     const auto camera = directory.path / "camera.yaml";
+    const auto image  = cv::Mat::zeros(540, 960, CV_8UC3);
     std::ofstream(camera) << "calibration: {camera_matrix: [900,0,480,0,900,270,0,0,1], "
-                             "distort_coeffs: [0,0,0,0,0]}\n";
+                             "distort_coeffs: [0,0,0,0,0]}\n"
+                             "handeye_calibration: {R_camera2gimbal: [0,0,1,-1,0,0,0,-1,0], "
+                             "t_camera2gimbal: [0,0,0], R_gimbal2imubody: [1,0,0,0,1,0,0,0,1]}\n";
     auto_buff::RmcsTracker tracker(camera, YAML::Node{});
     const auto truth = [](double time) {
         return .4 + 1.13 * time - .86 / 1.937 * std::cos(1.937 * time + .7);
@@ -77,7 +81,7 @@ void check_tracker_sine_prediction() {
         const double time = i / 80.;
         // synthetic 的参数只控制几何转角；曝光时间仍使用真实 time，不把相位当时间。
         const auto observation = tests::synthetic((truth(time) - .3) / .8, tests::intrinsics);
-        result = tracker.update(observation, time, {960, 540});
+        result = tracker.update(observation, time, image);
         tests::require(result.initialized, "RMCS lost the known sine-motion target");
     }
     tests::require(result.state.sine_valid, "RMCS EKF phase did not reach the robust sine fitter");
@@ -139,6 +143,9 @@ int main() {
         cv::Mat distortion = cv::Mat::zeros(1, 5, CV_64F);
         require(auto_buff::predict_rune_features(state, .1, intrinsic, distortion, Eigen::Isometry3d::Identity()).size() == 5,
                 "Predictor did not project all five board slots");
+        state.x = std::numeric_limits<double>::quiet_NaN();
+        require(auto_buff::predict_rune_features(state, .1, intrinsic, distortion, Eigen::Isometry3d::Identity()).empty(),
+                "Predictor emitted non-finite image coordinates");
         std::cout << "constant_speed=" << linear.prediction_speed << " sine_v=" << sine.sine_v
                   << " a=" << sine.sine_a << " omega=" << sine.sine_omega
                   << " future_error_rad=" << worst_error << '\n';

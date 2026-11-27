@@ -2,7 +2,7 @@
 /.cache/
 /build*/
 /output/
-/tests/data/output/
+/tests/data/
 /tests/output/
 /tests/results/
 /config/local*.yaml
@@ -26,7 +26,6 @@ compile_commands.json
 CMakeUserPresets.json
 
 # Large input media and historical training assets; keep tools and documentation
-/tests/data/video/
 /rm/**/*.pt
 /rm/**/*.onnx
 /rm/**/*.xml

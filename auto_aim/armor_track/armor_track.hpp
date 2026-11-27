@@ -74,16 +74,6 @@ class ArmorTrack
     int outpost_max_temp_lost_count_ = 75;                                 // 前哨站最大丢失次数
     std::chrono::steady_clock::time_point last_timestamp_;                 // 上一帧时间戳
 
-    Eigen::Vector3d                       raw_pnp_xyz_          = Eigen::Vector3d::Zero();   // 保存本帧原始 PnP 解算出来的世界坐标
-    double                                raw_pnp_armor_yaw_    = 0.0;                       // 保存本帧原始 PnP 解算出来的装甲板偏航角
-    bool                                  raw_pnp_valid_        = false;                     // 本帧原始 PnP 解算是否有效
-    int                                   matching_armor_count_ = 0;                         // 本帧匹配到目标编号和类型的装甲板数量
-    int                                   pnp_attempt_count_    = 0;                         // 本帧尝试 PnP 解算的次数
-    int                                   pnp_success_count_    = 0;                         // 本帧成功 PnP 解算的次数
-    double                                innovation_z_         = 0.0;                       // 本帧 PnP 与 EKF 预测的 z 方向新息
-    double                                innovation_norm_      = 0.0;                       // 本帧 PnP 与 EKF 预测的位移新息
-    std::string                           reject_reason_        = "none";                    // 本帧 PnP 解算被拒绝的原因
-    std::string                           reset_reason_         = "none";                    // 本帧 EKF 重置的原因
     /**
      * @brief 状态机处理
      * @param found 是否找到目标
@@ -106,10 +96,10 @@ class ArmorTrack
      */
     bool update_target(std::vector<Armor> &armors, std::chrono::steady_clock::time_point t);
 
-    // 原MAS的UDP诊断独立于图像debug，保留手眼标定原始数据。
+    // 手眼标定的 UDP 采集独立于图像 debug。
     bool plotter_enable_ = false;
     rm_utils::Plotter plotter_;
-    void plotDiagnostics(const std::vector<Armor> &, bool found, double dt, const std::string &state_before);
+    void plotHandeye(const std::vector<Armor> &armors);
 };
 
 } // namespace auto_aim

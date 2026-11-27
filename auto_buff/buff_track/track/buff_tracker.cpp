@@ -71,11 +71,10 @@ void RmcsTracker::reset()
     color_          = EnemyColor::UNKNOWN;
 }
 
-TrackResult RmcsTracker::update_model(const BuffDetector::Detection &detection, double seconds, cv::Size size)
+TrackResult RmcsTracker::update_model(const BuffDetector::Detection &detection, double seconds)
 {
     if (!std::isfinite(seconds) || seconds < 0)
         throw std::runtime_error("Invalid media timestamp");
-    camera_.check_image_size(size);
     // 时间倒退或中断过久时旧模型已不适用；短时漏检仍走下面的 predict 分支。
     if (last_time_ >= 0 && (seconds <= last_time_ || seconds - last_time_ > timeout_))
     {
@@ -143,8 +142,8 @@ TrackResult RmcsTracker::update_model(const BuffDetector::Detection &detection, 
         for (const auto &arm : detection.light_arms)
             if (arm.color == color_)
                 arms.push_back(arm);
-        result.geometry_boards = reconstruct_big_activated(arms, camera_.intrinsic(), camera_.distortion(),
-                                                           camera_.transform(), config_, icons, bullseyes);
+        result.geometry_boards = reconstruct_big_activated(arms, camera_.camera_matrix(), camera_.distort_coeffs(),
+                                                           camera_.camera_to_world(), config_, icons, bullseyes);
         for (const auto &board : result.geometry_boards)
         {
             auto_buff::RuneBullseye converted{};
@@ -161,8 +160,8 @@ TrackResult RmcsTracker::update_model(const BuffDetector::Detection &detection, 
     if (!model_)
     {
         auto model = std::make_unique<auto_buff::RuneModel>(config_);
-        model->update_camera(camera_.intrinsic(), camera_.distortion());
-        model->update_transform(camera_.transform());
+        model->update_camera(camera_.camera_matrix(), camera_.distort_coeffs());
+        model->update_transform(camera_.camera_to_world());
         if (model->init(icons, bullseyes, stamp))
         {
             model_          = std::move(model);
@@ -182,7 +181,7 @@ TrackResult RmcsTracker::update_model(const BuffDetector::Detection &detection, 
     }
     else
     {
-        model_->update_transform(camera_.transform());
+        model_->update_transform(camera_.camera_to_world());
         // 遮挡期间仍推进时间和协方差；空 correct 只刷新投影，不产生拟合样本。
         model_->predict(seconds - last_time_, stamp);
         bool pending_corrected = model_->correct(icons, bullseyes);
@@ -215,21 +214,21 @@ TrackResult RmcsTracker::update_model(const BuffDetector::Detection &detection, 
     result.state       = model_->state();
     result.ekf         = model_->ekf_snapshot();
     // 空观测分支已清空 tracked，不会把上一帧的匹配当作本帧新观测。
-    result.matched   = model_->addition().tracked;
+    result.matched   = model_->association().matched;
     result.observed  = initialized_now || !result.matched.empty();
-    result.predicted = model_->addition().predicted;
+    result.predicted = model_->association().predicted;
     // 上游 converge 恒为 true；实际可用条件由瞄准点预热和待击板有效期决定。
     result.ready  = !result.state.get_aimpoints().empty();
     result.status = result.observed ? (result.ready ? "tracking" : "warming_up") : "predicting";
     // 未来投影只修改状态副本，直接复用当前相机参数。
-    result.future = auto_buff::predict_rune_features(result.state, horizon_, camera_.intrinsic(), camera_.distortion(),
-                                                     camera_.transform());
+    result.future = auto_buff::predict_rune_features(result.state, horizon_, camera_.camera_matrix(),
+                                                     camera_.distort_coeffs(), camera_.camera_to_world());
     return result;
 }
 
 TrackResult RmcsTracker::update(const BuffDetector::Detection &detection, double seconds, const cv::Mat &image)
 {
-    auto result = update_model(detection, seconds, image.size());
+    auto result = update_model(detection, seconds);
     track_debug_.draw(result, image);
     return result;
 }

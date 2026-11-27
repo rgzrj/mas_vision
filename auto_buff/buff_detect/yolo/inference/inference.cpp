@@ -1,6 +1,6 @@
 #include "inference.hpp"
 
-#include "rm_utils/yolo_timing.hpp"
+#include "../timing.hpp"
 
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
@@ -90,7 +90,7 @@ void Inference::prepare(Slot &frame, const cv::Mat &image, float *data)
     frame.prepare_ms = 0.0;
 
     TracyCZoneN(zone, "YOLO preprocess", frame.profiling);
-    rm_utils::TimedZone timer(frame.prepare_ms, zone, frame.profiling);
+    TimedZone timer(frame.prepare_ms, zone, frame.profiling);
 
     // 居中 letterbox，保存还原坐标所需的缩放和填充量。
     frame.scale = std::min(double(kInputWidth) / image.cols, double(kInputHeight) / image.rows);

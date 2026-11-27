@@ -18,7 +18,7 @@ public:
 
 private:
     std::optional<Detection> collect_impl() override;
-    Detection detect_impl(const cv::Mat &image);
+    Detection detect_impl(const cv::Mat &image, RuneMode mode);
 
     RuneDetector detector_;
     cv::Size calibration_size_;

@@ -2,7 +2,7 @@
 
 #include "../pixels/pixel_geometry.hpp"
 #include "../pixels/pixel_refiner.hpp"
-#include "rm_utils/yolo_timing.hpp"
+#include "../timing.hpp"
 
 #include <opencv2/imgproc.hpp>
 #include <algorithm>
@@ -189,11 +189,10 @@ BuffDetector::Detection make_pose_detection(const std::vector<PoseDetection> &po
         if (refine)
         {
             TracyCZoneN(refine_zone, "PixelRefine", profiling);
-            rm_utils::TimedZone refine_timer(rm_utils::yolo_timing.refine_ms, refine_zone,
-                                            rm_utils::yolo_timing.enabled);
+            TimedZone refine_timer(yolo_timing.refine_ms, refine_zone, yolo_timing.enabled);
 
-            if (rm_utils::yolo_timing.enabled)
-                ++rm_utils::yolo_timing.refine_calls;
+            if (yolo_timing.enabled)
+                ++yolo_timing.refine_calls;
 
             center_valid = refine_yolo_pose_pixels(image, pose, board, center_valid);
         }

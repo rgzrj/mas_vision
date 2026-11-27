@@ -4,7 +4,7 @@
 #include "yolo/yolo.hpp"
 #include "auto_buff/debug/visualize/detect_debug.hpp"
 #include "mas_log.hpp"
-#include "rm_utils/yolo_timing.hpp"
+#include "yolo/timing.hpp"
 
 #include <yaml-cpp/yaml.h>
 #include <algorithm>
@@ -24,7 +24,7 @@ std::unique_ptr<BuffDetector> BuffDetector::create(const std::filesystem::path &
         if (backend == "yolo")
         {
             if (config["auto_buff"]["detect"]["yolo"]["tracy_debug"].as<bool>(false))
-                rm_utils::start_tracy();
+                start_tracy();
 
             return std::make_unique<YoloDetector>(config, config_path.parent_path());
         }

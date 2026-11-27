@@ -92,7 +92,7 @@ struct RuneShooter::Impl
 
     auto aim(const RuneState &track, rm_utils::Timestamp track_timestamp) -> std::optional<Aimed>
     {
-        const auto direction        = track.get_direction();
+        const auto direction        = track.center_in_world();
         const auto distance         = direction.norm();
         const auto initial_fly_time = distance / config.bullet_speed;
         // track_timestamp 是曝光时刻，state.timestamp 是解算时刻；两者之差是处理延迟。
@@ -125,7 +125,7 @@ struct RuneShooter::Impl
         {
             auto future = track;
             future.transition(fly_time + fixed_delay);
-            center = future.get_direction();
+            center = future.center_in_world();
 
             const auto aimpoints = future.get_aimpoints();
             if (selected && !aimpoints.empty())

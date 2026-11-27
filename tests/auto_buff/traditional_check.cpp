@@ -92,6 +92,11 @@ void check_traditional() {
     require(active.boards.size() == 1 && active.boards[0].appearance == auto_buff::Appearance::single_ring &&
                 !active.boards[0].features_valid,
             "Single ring must be active with no physical arm endpoints");
+    auto big_active = tests::detect(detector, ring, 0, auto_buff::RuneMode::big);
+    require(big_active.boards.size() == 1 &&
+                big_active.boards[0].appearance == auto_buff::Appearance::big_activated &&
+                !big_active.boards[0].features_valid,
+            "Traditional big-rune mode discarded an active center");
     for (auto corner : active.boards[0].corners)
         require(corner == cv::Point2d{}, "Upstream ring radius placeholders leaked as arm measurements");
     // 同一检测器切色，模拟电控覆盖本地红色后再恢复配置。

@@ -175,20 +175,13 @@ bool Target::update(const Armor &armor)
     }
     if (best_id < 0) return false;
 
-    Eigen::Vector3d predicted_xyz = predicted[best_id].head<3>();
     if (name == "outpost")
-    {
         update_height(best_id, armor.xyz_in_world[2]);
-        predicted_xyz = h_armor_xyz(ekf_.x, best_id);
-    }
 
-    const Eigen::Vector3d innovation = armor.xyz_in_world - predicted_xyz;
-    last_innovation_z_    = innovation.z();
-    last_innovation_norm_ = innovation.norm();
-    
     if (best_id != 0) jumped = true;
+    
     is_switch = best_id != last_id;
-    last_id = best_id;
+    last_id   = best_id;
     update_count++;
 
     update_ypda(armor, best_id);

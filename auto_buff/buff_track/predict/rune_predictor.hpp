@@ -1,7 +1,7 @@
 #pragma once
 
-#include "auto_buff/buff_track/buff_state.hpp"
-#include "rm_utils/algorithm/buff/rune_energy_fitter.hpp"
+#include "auto_buff/buff_track/track_types.hpp"
+#include "rm_utils/algorithm/rune_energy_fitter.hpp"
 
 #include <Eigen/Geometry>
 #include <opencv2/core.hpp>
@@ -37,12 +37,13 @@ private:
  * @brief 在状态副本上外推，再将五个符板中心投影回原图。
  * @param state 当前世界系状态，调用后保持不变。
  * @param seconds 向未来外推的时长，单位秒。
- * @param intrinsic 原图内参矩阵。
- * @param distortion 畸变系数。
+ * @param camera_matrix 原图内参矩阵。
+ * @param distort_coeffs 畸变系数。
  * @param transform 当前相机到世界的变换，平移单位米。
  * @return 可投影的符板中心，feature_id 为 1～5；不包含 R。
  */
-auto predict_rune_features(const RuneState &state, double seconds, const cv::Mat &intrinsic, const cv::Mat &distortion,
-                           const Eigen::Isometry3d &transform) -> std::vector<RuneAddition::Tracked>;
+auto predict_rune_features(const RuneState &state, double seconds, const cv::Mat &camera_matrix,
+                           const cv::Mat &distort_coeffs, const Eigen::Isometry3d &transform)
+    -> std::vector<RuneAssociation::Tracked>;
 
 } // namespace auto_buff

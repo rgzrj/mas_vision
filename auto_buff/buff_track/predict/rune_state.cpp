@@ -1,4 +1,4 @@
-#include "auto_buff/buff_track/buff_state.hpp"
+#include "auto_buff/buff_track/track_types.hpp"
 #include "rm_utils/algorithm/math_tools.hpp"
 
 #include <Eigen/Geometry>
@@ -37,7 +37,7 @@ auto RuneState::transition(double seconds) -> void
     }
 }
 
-auto RuneState::get_direction() const -> Eigen::Vector3d
+auto RuneState::center_in_world() const -> Eigen::Vector3d
 {
     return {x, y, z};
 }

@@ -21,15 +21,13 @@ struct PoseSolver
     using StateVector = RuneStateVector;
     using Observable  = RuneObservable;
     const RuneConfig &config;
-    const cv::Mat &intrinsic, &distortion;
-    const Eigen::Isometry3d &camera_transform;
     Observable observable;
 
     // 一个 R × 种子板组合的空间解与误差；最终选择同时参考其他待击板的布局支持。
     struct InitCandidate
     {
-        Eigen::Vector3d center_odom{Eigen::Vector3d::Zero()};
-        double face_yaw_odom  = 0.0;
+        Eigen::Vector3d center_in_world{Eigen::Vector3d::Zero()};
+        double face_yaw_in_world = 0.0;
         double rotation_angle = 0.0;
 
         cv::Point2d icon_pixel;
@@ -47,30 +45,31 @@ struct PoseSolver
 
     struct InitLayoutScore
     {
-        double icon_error          = std::numeric_limits<double>::max();
-        double seed_center_error   = std::numeric_limits<double>::max();
-        int inactive_inliers       = 0;
-        double inactive_center_sse = std::numeric_limits<double>::max();
+        double icon_error          = std::numeric_limits<double>::max(); // R 标识像素重投影误差平方和
+        double seed_center_error   = std::numeric_limits<double>::max(); // 种子板圆心像素重投影误差
+        int inactive_inliers       = 0;                                  // 其余待击板落在误差门限内的内点数量
+        double inactive_center_sse = std::numeric_limits<double>::max(); // 其余待击板圆心重投影误差平方和(SSE)
     };
 
     // 用完整五点重新投影，返回误差平方和与最大像素误差，避免只信任 PnP 成功标志。
-    auto evaluate_seed_reprojection(const SingleRunePnpSolution::Input &input, const Eigen::Vector3d &t_camera_rune,
-                                    const Eigen::Quaterniond &q_camera_rune) const
+    auto evaluate_seed_reprojection(const RuneBullseye &board, cv::Point2d icon, const Eigen::Vector3d &xyz_in_camera,
+                                    const Eigen::Quaterniond &q_rune2camera) const
         -> std::optional<std::pair<double, double>>
     {
-        const auto image_points_opt = input.image_points();
+        const auto image_points_opt = SingleRunePnpSolution::image_points(board, icon);
         if (!image_points_opt)
             return std::nullopt;
 
-        const auto rotation_opencv    = rm_utils::util::ros2opencv_rotation(q_camera_rune.toRotationMatrix());
-        const auto translation_opencv = rm_utils::util::ros2opencv_position(t_camera_rune);
+        const auto rotation_opencv    = rm_utils::util::flu2opencv_rotation(q_rune2camera.toRotationMatrix());
+        const auto translation_opencv = rm_utils::util::flu2opencv_position(xyz_in_camera);
 
         auto camera_points = std::array<cv::Point3f, 5>{};
         for (const auto &[index, point] : RunePagePoints::kPoints | std::views::enumerate)
         {
-            const auto p_local_ros                         = point;
-            const auto p_local_ocv                         = rm_utils::util::ros2opencv_position(p_local_ros);
-            const auto p_camera                            = rotation_opencv * p_local_ocv + translation_opencv;
+            const auto p_local_flu = point;
+            const auto p_local_ocv = rm_utils::util::flu2opencv_position(p_local_flu);
+            const auto p_camera    = rotation_opencv * p_local_ocv + translation_opencv;
+
             camera_points[static_cast<std::size_t>(index)] = cv::Point3f{
                 static_cast<float>(p_camera.x()),
                 static_cast<float>(p_camera.y()),
@@ -78,7 +77,9 @@ struct PoseSolver
             };
         }
 
-        const auto projected_points = rm_utils::util::reproject_points(camera_points, intrinsic, distortion);
+        // 计算五点的重投影误差平方和与最大误差，避免只信任 PnP 成功标志。
+        const auto projected_points =
+            rm_utils::util::reproject_points(camera_points, observable.camera_matrix, observable.distort_coeffs);
         if (projected_points.size() != image_points_opt->size())
             return std::nullopt;
 
@@ -99,16 +100,16 @@ struct PoseSolver
     // 后续 EKF 采用相同投影模型，故初始化不能只满足一个任意六自由度 PnP 解。
     auto evaluate_reduced_layout(const RuneIcon &icon, const RuneBullseye &seed,
                                  std::span<const RuneBullseye> other_inactive_bullseyes,
-                                 const Eigen::Vector3d &center_odom, double face_yaw_odom, double rotation_angle) const
-        -> std::optional<InitLayoutScore>
+                                 const Eigen::Vector3d &center_in_world, double face_yaw_in_world,
+                                 double rotation_angle) const -> std::optional<InitLayoutScore>
     {
         auto simulated    = observable;
         StateVector state = StateVector::Zero();
-        state[kX]         = center_odom.x();
-        state[kY]         = center_odom.y();
-        state[kZ]         = center_odom.z();
+        state[kX]         = center_in_world.x();
+        state[kY]         = center_in_world.y();
+        state[kZ]         = center_in_world.z();
         state[kA]         = rotation_angle;
-        state[kPsi]       = face_yaw_odom;
+        state[kPsi]       = face_yaw_in_world;
         simulated.update(state);
 
         constexpr auto kSeedBlade = 1;
@@ -121,10 +122,10 @@ struct PoseSolver
 
         auto score                  = InitLayoutScore{};
         const auto icon_observation = Eigen::Vector2d{icon.center.x, icon.center.y};
-        score.icon_error            = (icon_observation - simulated.projected[Observable::kFeatureIcon]).squaredNorm();
+        score.icon_error = (icon_observation - simulated.points_in_image[Observable::kFeatureIcon]).squaredNorm();
 
         const auto seed_observation = Eigen::Vector2d{seed.center.x, seed.center.y};
-        score.seed_center_error     = (seed_observation - simulated.projected[kSeedBlade]).squaredNorm();
+        score.seed_center_error     = (seed_observation - simulated.points_in_image[kSeedBlade]).squaredNorm();
         if (score.seed_center_error > gate2)
             return std::nullopt;
 
@@ -148,7 +149,7 @@ struct PoseSolver
             {
                 if (!simulated.visible[blade])
                     continue;
-                best_err2 = std::min(best_err2, (observation - simulated.projected[blade]).squaredNorm());
+                best_err2 = std::min(best_err2, (observation - simulated.points_in_image[blade]).squaredNorm());
             }
             if (best_err2 > gate2)
                 continue;
@@ -167,19 +168,14 @@ struct PoseSolver
                              std::span<const RuneBullseye> other_inactive_bullseyes) const
         -> std::optional<InitCandidate>
     {
-        auto pnp             = SingleRunePnpSolution{};
-        pnp.input.intrinsic  = intrinsic;
-        pnp.input.distortion = distortion;
-        pnp.input.center     = seed.center;
-        pnp.input.icon       = icon.center;
-        pnp.input.corners    = seed.corners;
-        if (!pnp.solve())
+        auto pnp = SingleRunePnpSolution{};
+        if (!pnp.solve(seed, icon.center, observable.camera_matrix, observable.distort_coeffs))
             return std::nullopt;
 
-        const auto t_camera_rune = pnp.result.translation;
-        const auto q_camera_rune = pnp.result.orientation.normalized();
+        const auto xyz_in_camera = pnp.result.xyz_in_camera;
+        const auto q_rune2camera = pnp.result.q_rune2camera.normalized();
 
-        const auto seed_error = evaluate_seed_reprojection(pnp.input, t_camera_rune, q_camera_rune);
+        const auto seed_error = evaluate_seed_reprojection(seed, icon.center, xyz_in_camera, q_rune2camera);
         if (!seed_error)
             return std::nullopt;
 
@@ -189,12 +185,12 @@ struct PoseSolver
         if (seed_error->second > config.init_seed_max_error)
             return std::nullopt;
 
-        const auto q_odom_camera = Eigen::Quaterniond(camera_transform.rotation());
-        const auto t_odom_camera = Eigen::Vector3d(camera_transform.translation());
+        const auto q_camera2world = Eigen::Quaterniond(observable.T_camera2world.rotation());
+        const auto t_camera2world = Eigen::Vector3d(observable.T_camera2world.translation());
 
         auto candidate         = InitCandidate{};
-        const auto r_page_odom = (q_odom_camera * q_camera_rune).normalized().toRotationMatrix();
-        const auto face_x_odom = r_page_odom.col(0);
+        const auto R_rune2world = (q_camera2world * q_rune2camera).normalized().toRotationMatrix();
+        const auto face_x_odom  = R_rune2world.col(0);
         constexpr auto kYawEps = 1e-6;
         if (face_x_odom.head<2>().squaredNorm() <= kYawEps)
             return std::nullopt;
@@ -204,26 +200,26 @@ struct PoseSolver
             return std::nullopt;
 
         const auto base_yaw      = std::atan2(face_x_odom.y(), face_x_odom.x());
-        candidate.center_odom    = q_odom_camera * t_camera_rune + t_odom_camera;
+        candidate.center_in_world = q_camera2world * xyz_in_camera + t_camera2world;
         candidate.seed_sse       = seed_error->first;
         candidate.seed_max_error = seed_error->second;
 
         {
             const auto face_x_camera =
-                q_odom_camera.conjugate() * Eigen::Vector3d{std::cos(base_yaw), std::sin(base_yaw), 0.0};
+                q_camera2world.conjugate() * Eigen::Vector3d{std::cos(base_yaw), std::sin(base_yaw), 0.0};
             if (face_x_camera.x() <= 0.0)
                 return std::nullopt;
 
             const auto r_yaw_inv    = Eigen::AngleAxisd{-base_yaw, Eigen::Vector3d::UnitZ()}.toRotationMatrix();
-            const auto r_seed_local = r_yaw_inv * r_page_odom;
+            const auto r_seed_local = r_yaw_inv * R_rune2world;
             const auto seed_angle   = std::atan2(-r_seed_local(1, 2), r_seed_local(2, 2));
 
             const auto layout_score = evaluate_reduced_layout(icon, seed, other_inactive_bullseyes,
-                                                              candidate.center_odom, base_yaw, seed_angle);
+                                                              candidate.center_in_world, base_yaw, seed_angle);
             if (!layout_score)
                 return std::nullopt;
 
-            candidate.face_yaw_odom       = base_yaw;
+            candidate.face_yaw_in_world   = base_yaw;
             candidate.rotation_angle      = seed_angle;
             candidate.inactive_inliers    = layout_score->inactive_inliers;
             candidate.icon_error          = layout_score->icon_error;
@@ -235,7 +231,7 @@ struct PoseSolver
     }
 
     // 优先保留支持更多待击板的解，再依次比较板心、R 和种子点误差；不按 R 分数一票决定。
-    static auto better_init_candidate(const InitCandidate &lhs, const InitCandidate &rhs)
+    bool better_init_candidate(const InitCandidate &lhs, const InitCandidate &rhs) const
     {
         if (lhs.inactive_inliers != rhs.inactive_inliers)
         {
@@ -319,20 +315,27 @@ struct PoseSolver
         if (!best_candidate)
             return std::nullopt;
 
-        return RunePose{best_candidate->center_odom, best_candidate->face_yaw_odom, best_candidate->rotation_angle,
-                        best_candidate->icon_pixel, best_candidate->seed_pixel};
+        return RunePose{best_candidate->center_in_world, best_candidate->face_yaw_in_world,
+                        best_candidate->rotation_angle, best_candidate->icon_pixel, best_candidate->seed_pixel};
     }
 };
 } // namespace
 
-auto solve_rune_pose(const RuneConfig &config, const cv::Mat &intrinsic, const cv::Mat &distortion,
-                     const Eigen::Isometry3d &camera_transform, std::span<const RuneIcon> icons,
+/**
+ * @brief 由相机内参、畸变、相机位姿和符板布局求解符面世界系位姿。
+ * @param config 符板配置参数。
+ * @param camera_matrix 相机内参矩阵，3x3，CV_64F。
+ * @param distort_coeffs 相机畸变系数，1x5，CV_64F。
+ * @param T_camera2world 相机在世界系的位姿变换。
+ * @param icons 当前帧检测到的 R 标识。
+ * @param bullseyes 当前帧检测到的符板圆环。
+ * @return 成功时返回符面世界系位姿，否则为空。
+ */
+auto solve_rune_pose(const RuneConfig &config, const cv::Mat &camera_matrix, const cv::Mat &distort_coeffs,
+                     const Eigen::Isometry3d &T_camera2world, std::span<const RuneIcon> icons,
                      std::span<const RuneBullseye> bullseyes) -> std::optional<RunePose>
 {
-    auto solver                       = PoseSolver{config, intrinsic, distortion, camera_transform, {}};
-    solver.observable.intrinsic       = intrinsic;
-    solver.observable.distortion      = distortion;
-    solver.observable.camera_to_world = camera_transform;
+    auto solver = PoseSolver{config, {camera_matrix, distort_coeffs, T_camera2world}};
     return solver.solve(icons, bullseyes);
 }
 

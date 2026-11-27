@@ -1,6 +1,6 @@
 #pragma once
 
-#include "auto_buff/buff_track/buff_state.hpp"
+#include "auto_buff/buff_track/track_types.hpp"
 #include "rm_utils/pimpl.hpp"
 
 #include <opencv2/core/mat.hpp>

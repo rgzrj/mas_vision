@@ -3,26 +3,27 @@
 
 namespace rm_utils::util {
 
-// OpenCV 与 ROS 坐标系之间的变换矩阵
-inline const Eigen::Matrix3d kCoordTransformMatrix {
+// FLU（Forward-Left-Up）坐标系：X 向前、Y 向左、Z 向上。
+// OpenCV 相机坐标系：X 向右、Y 向下、Z 向前。
+inline const Eigen::Matrix3d R_opencv2flu {
     { +0, +0, +1 },
     { -1, +0, +0 },
     { +0, -1, +0 },
 };
 
-inline auto opencv2ros_position(const Eigen::Vector3d& position) -> Eigen::Vector3d {
+inline auto opencv2flu_position(const Eigen::Vector3d& position) -> Eigen::Vector3d {
     auto result = Eigen::Vector3d { position.z(), -position.x(), -position.y() };
     return result;
 }
-inline auto opencv2ros_rotation(const Eigen::Matrix3d& rotation_matrix) -> Eigen::Matrix3d {
-    return kCoordTransformMatrix * rotation_matrix * kCoordTransformMatrix.transpose();
+inline auto opencv2flu_rotation(const Eigen::Matrix3d& rotation_matrix) -> Eigen::Matrix3d {
+    return R_opencv2flu * rotation_matrix * R_opencv2flu.transpose();
 }
-inline auto ros2opencv_position(const Eigen::Vector3d& position) -> Eigen::Vector3d {
+inline auto flu2opencv_position(const Eigen::Vector3d& position) -> Eigen::Vector3d {
     auto result = Eigen::Vector3d { -position.y(), -position.z(), position.x() };
     return result;
 }
-inline auto ros2opencv_rotation(const Eigen::Matrix3d& rotation_matrix) -> Eigen::Matrix3d {
-    return kCoordTransformMatrix.transpose() * rotation_matrix * kCoordTransformMatrix;
+inline auto flu2opencv_rotation(const Eigen::Matrix3d& rotation_matrix) -> Eigen::Matrix3d {
+    return R_opencv2flu.transpose() * rotation_matrix * R_opencv2flu;
 }
 
 

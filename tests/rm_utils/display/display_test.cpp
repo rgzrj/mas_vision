@@ -46,8 +46,10 @@ int main()
                 "Rerun image sampling or rewind handling changed");
         display.set_time(0);
         const auto camera = temporary.path / "camera.yaml";
-        std::ofstream(camera) << "image_width: 960\nimage_height: 540\n"
-                                 "camera_matrix: [900,0,480,0,900,270,0,0,1]\ndistortion: [0,0,0,0,0]\n";
+        std::ofstream(camera) << "calibration: {image_width: 960, image_height: 540, "
+                                 "camera_matrix: [900,0,480,0,900,270,0,0,1], distort_coeffs: [0,0,0,0,0]}\n"
+                                 "handeye_calibration: {R_camera2gimbal: [0,0,1,-1,0,0,0,-1,0], "
+                                 "t_camera2gimbal: [0,0,0], R_gimbal2imubody: [1,0,0,0,1,0,0,0,1]}\n";
         const auto config_path = temporary.path / "buff.yaml";
         std::ofstream(config_path) << "auto_buff:\n  track: {debug: true}\n  shoot: {debug: true}\n";
         auto_buff::TraditionalDetector detector(tests::traditional_config("red", YAML::Load("debug: true")), YAML::LoadFile(camera.string()));

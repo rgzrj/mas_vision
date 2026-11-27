@@ -97,7 +97,7 @@ struct RuneModel::Impl
     Context context;
     std::array<bool, 5> blade_inactive{};                        // true 表示该板位仍可击打，沿用原版 inactive 命名。
     std::array<rm_utils::Timestamp, 5> blade_inactive_timeout{}; // 最近待击板校正延长该板位有效期。
-    RuneAddition addition{};
+    RuneAssociation association{};
     rm_utils::Timestamp init_timestamp{};
     rm_utils::Timestamp current_stamp;
     RunePredictor predictor;
@@ -112,13 +112,13 @@ struct RuneModel::Impl
     // 初始化求解和跟踪投影共享同一份内参与畸变，避免两条几何路径不一致。
     auto configure_camera(const cv::Mat &matrix, const cv::Mat &coeff) noexcept -> void
     {
-        observable.intrinsic  = matrix;
-        observable.distortion = coeff;
+        observable.camera_matrix  = matrix;
+        observable.distort_coeffs = coeff;
     }
 
     auto update_transform(const Eigen::Isometry3d &t) noexcept -> void
     {
-        observable.camera_to_world = t;
+        observable.T_camera2world = t;
     }
 
     // EKF 预测只用恒角速度推进转角；正弦/恒速拟合用于导出角速度及未来状态。
@@ -150,10 +150,10 @@ struct RuneModel::Impl
 
         const auto theta           = state[kA];
         const auto psi             = state[kPsi];
-        const auto r_cam_from_odom = observable.camera_to_world.rotation().transpose().eval();
+        const auto r_cam_from_odom = observable.T_camera2world.rotation().transpose().eval();
 
-        const auto &cam_pt   = observable.in_camera[feature_id];
-        const auto point_ocv = rm_utils::util::ros2opencv_position(cam_pt);
+        const auto &cam_pt   = observable.points_in_camera[feature_id];
+        const auto point_ocv = rm_utils::util::flu2opencv_position(cam_pt);
         const auto depth     = point_ocv.z();
         constexpr auto kMinZ = 0.1;
         if (depth < kMinZ)
@@ -162,8 +162,8 @@ struct RuneModel::Impl
         Eigen::Matrix<double, 2, 3> proj_jac;
         // clang-format off
         proj_jac <<
-            observable.intrinsic.at<double>(0, 0) / depth,                        0, -observable.intrinsic.at<double>(0, 0) * point_ocv.x() / (depth * depth),
-                                                  0, observable.intrinsic.at<double>(1, 1) / depth, -observable.intrinsic.at<double>(1, 1) * point_ocv.y() / (depth * depth);
+            observable.camera_matrix.at<double>(0, 0) / depth,                        0, -observable.camera_matrix.at<double>(0, 0) * point_ocv.x() / (depth * depth),
+                                                  0, observable.camera_matrix.at<double>(1, 1) / depth, -observable.camera_matrix.at<double>(1, 1) * point_ocv.y() / (depth * depth);
         // clang-format on
 
         Eigen::Matrix3d cam_ros_jac;
@@ -218,7 +218,7 @@ struct RuneModel::Impl
     {
         const auto prior_state      = context.posteriors_state;
         const auto prior_covariance = context.posteriors_covariance;
-        const auto pred             = observable.projected[feature_id];
+        const auto pred             = observable.points_in_image[feature_id];
 
         auto innovation = Eigen::Vector2d{observed - pred};
         if (innovation.hasNaN())
@@ -260,18 +260,18 @@ struct RuneModel::Impl
               rm_utils::Timestamp timestamp) noexcept -> bool
     {
         // pose 只返回几何解；滤波状态和协方差仍由 track 初始化并持有。
-        const auto best_candidate = solve_rune_pose(config, observable.intrinsic, observable.distortion,
-                                                    observable.camera_to_world, icons, bullseyes);
+        const auto best_candidate = solve_rune_pose(config, observable.camera_matrix, observable.distort_coeffs,
+                                                    observable.T_camera2world, icons, bullseyes);
         if (!best_candidate)
             return false;
 
         context.posteriors_state       = StateVector::Zero();
-        context.posteriors_state[kX]   = best_candidate->center_odom.x();
-        context.posteriors_state[kY]   = best_candidate->center_odom.y();
-        context.posteriors_state[kZ]   = best_candidate->center_odom.z();
+        context.posteriors_state[kX]   = best_candidate->center_in_world.x();
+        context.posteriors_state[kY]   = best_candidate->center_in_world.y();
+        context.posteriors_state[kZ]   = best_candidate->center_in_world.z();
         context.posteriors_state[kW]   = 0.0;
         context.posteriors_state[kA]   = best_candidate->rotation_angle;
-        context.posteriors_state[kPsi] = best_candidate->face_yaw_odom;
+        context.posteriors_state[kPsi] = best_candidate->face_yaw_in_world;
 
         context.reset_covariance();
         init_timestamp     = timestamp;
@@ -286,15 +286,15 @@ struct RuneModel::Impl
         update(Eigen::Vector2d{best_candidate->icon_pixel.x, best_candidate->icon_pixel.y}, 0);
         update(Eigen::Vector2d{best_candidate->seed_pixel.x, best_candidate->seed_pixel.y}, 1);
 
-        addition.tracked.clear();
-        addition.predicted.clear();
+        association.matched.clear();
+        association.predicted.clear();
         for (int feature_id = 0; feature_id < Observable::kFeatureCount; ++feature_id)
         {
             if (!observable.visible[feature_id])
                 continue;
-            addition.predicted.push_back({
+            association.predicted.push_back({
                 feature_id,
-                cv::Point2d{observable.projected[feature_id].x(), observable.projected[feature_id].y()},
+                cv::Point2d{observable.points_in_image[feature_id].x(), observable.points_in_image[feature_id].y()},
             });
         }
 
@@ -335,14 +335,14 @@ struct RuneModel::Impl
                 inactive = false;
         }
 
-        addition.predicted.clear();
+        association.predicted.clear();
         for (int feature_id = 0; feature_id < Observable::kFeatureCount; ++feature_id)
         {
             if (!observable.visible[feature_id])
                 continue;
-            addition.predicted.push_back({
+            association.predicted.push_back({
                 feature_id,
-                cv::Point2d{observable.projected[feature_id].x(), observable.projected[feature_id].y()},
+                cv::Point2d{observable.points_in_image[feature_id].x(), observable.points_in_image[feature_id].y()},
             });
         }
 
@@ -363,7 +363,7 @@ struct RuneModel::Impl
         if (observations.empty())
         {
             // 空观测只刷新投影和状态有效期，不校正、不向拟合器添加预测点。
-            addition.tracked.clear();
+            association.matched.clear();
             return false;
         }
         const auto N = static_cast<int>(observations.size());
@@ -404,7 +404,7 @@ struct RuneModel::Impl
                 if (mismatch)
                     continue;
 
-                auto innovation = observations[i].pixel - observable.projected[j];
+                auto innovation = observations[i].pixel - observable.points_in_image[j];
                 auto d2         = rm_utils::util::mahalanobis_distance(innovation, pred_infos[j].S);
                 if (!d2)
                     continue;
@@ -414,7 +414,7 @@ struct RuneModel::Impl
 
         auto assignments = rm_utils::util::hungarian_assign(cost, config.gate_threshold);
 
-        addition.tracked.clear();
+        association.matched.clear();
         auto inactive_corrected = 0, active_corrected = 0;
         for (int i = 0; i < N; ++i)
         {
@@ -425,7 +425,7 @@ struct RuneModel::Impl
                 continue;
 
             // 前一个观测可能已经改变状态与协方差，此处按最新结果检查创新的数值有效性。
-            auto innovation = observations[i].pixel - observable.projected[j];
+            auto innovation = observations[i].pixel - observable.points_in_image[j];
             auto d2         = rm_utils::util::mahalanobis_distance(
                 innovation, pred_infos[j].H * context.posteriors_covariance * pred_infos[j].H.transpose() + R);
             if (!d2)
@@ -447,7 +447,7 @@ struct RuneModel::Impl
                     active_corrected++;
                 }
             }
-            addition.tracked.push_back({j, cv::Point2d{observations[i].pixel.x(), observations[i].pixel.y()}});
+            association.matched.push_back({j, cv::Point2d{observations[i].pixel.x(), observations[i].pixel.y()}});
 
             // 刷新雅可比供下一个已分配观测使用；S 只在初始代价矩阵中读取，无需重复计算。
             for (int jj = 0; jj < M; ++jj)
@@ -555,9 +555,9 @@ auto RuneModel::state() const noexcept -> RuneState
     return pimpl->context.get_state(pimpl->blade_inactive, pimpl->init_timestamp);
 }
 
-auto RuneModel::addition() const -> const RuneAddition &
+auto RuneModel::association() const -> const RuneAssociation &
 {
-    return pimpl->addition;
+    return pimpl->association;
 }
 
 auto RuneModel::ekf_snapshot() const noexcept -> RuneEkfSnapshot

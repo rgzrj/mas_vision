@@ -48,7 +48,7 @@ struct RuneState
     auto transition(double seconds) -> void;
 
     /// 返回符中心的世界坐标，单位米，供弹道解算使用。
-    auto get_direction() const -> Eigen::Vector3d;
+    auto center_in_world() const -> Eigen::Vector3d;
     /**
      * @brief 取得当前首个有效待击板的空间瞄准点及方向前馈。
      * @return 未预热完成或无待击板时为空；保留 RMCS 的固定板位遍历顺序。
@@ -67,8 +67,8 @@ struct RuneEkfSnapshot
 // 初始化几何解由 pose 返回，不持有滤波器或生命周期。
 struct RunePose
 {
-    Eigen::Vector3d center_odom; // 符中心世界坐标，单位米。
-    double face_yaw_odom;        // 符面法线的世界系偏航，单位 rad。
+    Eigen::Vector3d center_in_world; // 符中心世界坐标，单位米。
+    double face_yaw_in_world;        // 符面法线的世界系偏航，单位 rad。
     double rotation_angle;       // 作为种子的符板转角，单位 rad。
     cv::Point2d icon_pixel;          // 被选中 R 的原图像素坐标。
     cv::Point2d seed_pixel;          // 被选中待击板的圆心，用于初始 EKF 校正。
@@ -118,7 +118,7 @@ struct RuneConfig
     double diverge_face_angle = 45.0; // 符面法线与世界原点到符中心方向的水平夹角上限，度。
 };
 
-struct RuneAddition
+struct RuneAssociation
 {
     struct Tracked
     {
@@ -126,7 +126,7 @@ struct RuneAddition
         cv::Point2d point;  // 原图像素坐标。
     };
 
-    std::vector<Tracked> tracked;   // 本帧被接受的观测。
+    std::vector<Tracked> matched;   // 本帧被接受的观测。
     std::vector<Tracked> predicted; // 本轮关联前各特征的投影位置。
 };
 

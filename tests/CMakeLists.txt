@@ -66,6 +66,11 @@ else()
     add_test(NAME buff_detect_test COMMAND buff_detect_test)
 endif()
 
+add_executable(buff_camera_test auto_buff/camera_test.cpp)
+vision_target_options(buff_camera_test)
+target_link_libraries(buff_camera_test PRIVATE auto_buff ${BUFF_YAML_TARGET})
+add_test(NAME buff_camera_test COMMAND buff_camera_test)
+
 add_executable(buff_pose_test auto_buff/pose_test.cpp)
 vision_target_options(buff_pose_test)
 target_link_libraries(buff_pose_test PRIVATE auto_buff ${BUFF_YAML_TARGET})

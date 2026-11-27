@@ -20,7 +20,7 @@ static void check_big_activated(const std::filesystem::path &camera_yaml)
 {
     using namespace auto_buff;
     using tests::require;
-    for (int scenario = 0; scenario < 3; ++scenario)
+    for (int scenario = 0; scenario < 5; ++scenario)
     {
         cv::Mat intrinsic(3, 3, CV_64F, const_cast<double *>(tests::intrinsics.data()));
         const std::array<double, 5> coefficients = scenario == 0 ? std::array<double, 5>{} :
@@ -77,7 +77,10 @@ static void check_big_activated(const std::filesystem::path &camera_yaml)
             return arm;
         };
         // Deliberately not a 72-degree multiple in scenario 1: fitting must follow the measured rod.
-        const double arm_phase = phase + (scenario == 1 ? 1.12 : 2 * std::numbers::pi / 5);
+        // 覆盖正负 pi 附近，检查换轴后转角正方向与分支边界保持一致。
+        const double arm_phase = scenario == 3   ? std::numbers::pi - .03
+                                 : scenario == 4 ? -std::numbers::pi + .03
+                                                 : phase + (scenario == 1 ? 1.12 : 2 * std::numbers::pi / 5);
         cv::Mat image(540, 960, CV_8UC3, cv::Scalar());
         const auto arm = render_arm(arm_phase, image);
         require(arm.contour.size() >= 8, "Physical lamp silhouette failed contour extraction");
@@ -208,12 +211,14 @@ int main()
         const auto camera_yaml = directory.path / "hikcamera.yaml";
         std::ofstream(camera_yaml)
             << "calibration: {camera_matrix: [900,0,480,0,900,270,0,0,1], "
-               "distort_coeffs: [0,0,0,0,0]}\n";
+               "distort_coeffs: [0,0,0,0,0]}\n"
+               "handeye_calibration: {R_camera2gimbal: [0,0,1,-1,0,0,0,-1,0], "
+               "t_camera2gimbal: [0,0,0], R_gimbal2imubody: [1,0,0,0,1,0,0,0,1]}\n";
         auto_buff::RuneCamera pose_camera(camera_yaml);
         check_big_activated(camera_yaml);
-        const auto &intrinsic = pose_camera.intrinsic();
-        const auto &distortion = pose_camera.distortion();
-        const auto &camera_transform = pose_camera.transform();
+        const auto &intrinsic        = pose_camera.camera_matrix();
+        const auto &distortion       = pose_camera.distort_coeffs();
+        const auto &camera_transform = pose_camera.camera_to_world();
         auto observation = tests::synthetic(0, tests::intrinsics);
         // 按新模型的 top/left/R/right/bottom 编码，再走生产解码与公共观测转换。
         // 验证五点中的 R 不会被误当成板心，RMCS 的 PnP 无需分辨权重来源。
@@ -257,17 +262,18 @@ int main()
             boards.push_back(target);
         }
         const auto pose = auto_buff::solve_rune_pose({}, intrinsic, distortion, camera_transform, icons, boards);
-        require(pose && (pose->center_odom - Eigen::Vector3d(5, 0, 0)).norm() < .05, "PnP failed known 3D geometry");
+        require(pose && (pose->center_in_world - Eigen::Vector3d(5, 0, 0)).norm() < .05,
+                "PnP failed known 3D geometry");
         // 使用生产代码的投影检验解，而非只检查 PnP 返回了一个值。
         auto_buff::RuneObservable projection;
-        projection.intrinsic = intrinsic;
-        projection.distortion = distortion;
-        projection.camera_to_world = camera_transform;
+        projection.camera_matrix  = intrinsic;
+        projection.distort_coeffs = distortion;
+        projection.T_camera2world = camera_transform;
         auto_buff::RuneStateVector state;
-        state << pose->center_odom, .8, pose->rotation_angle, pose->face_yaw_odom;
+        state << pose->center_in_world, .8, pose->rotation_angle, pose->face_yaw_in_world;
         projection.update(state);
         const auto r       = icons.front().center;
-        const double error = (projection.projected[0] - Eigen::Vector2d(r.x, r.y)).norm();
+        const double error = (projection.points_in_image[0] - Eigen::Vector2d(r.x, r.y)).norm();
         require(error < 1, "PnP R reprojection error exceeds one pixel");
         // 检测端四端点的排列应统一还原为同一物理点序。
         const auto corners = boards.front().corners;
@@ -278,7 +284,7 @@ int main()
                 boards.front().corners[i] = corners[order[i]];
 
             const auto reordered = auto_buff::solve_rune_pose({}, intrinsic, distortion, camera_transform, icons, boards);
-            require(reordered && (reordered->center_odom - pose->center_odom).norm() < 1e-6 &&
+            require(reordered && (reordered->center_in_world - pose->center_in_world).norm() < 1e-6 &&
                         std::abs(rm_utils::limit_rad(reordered->rotation_angle - pose->rotation_angle)) < 1e-6,
                     "Corner permutation changed the PnP solution");
         } while (std::next_permutation(order.begin(), order.end()));
@@ -286,7 +292,7 @@ int main()
 
         icons.insert(icons.begin(), auto_buff::RuneIcon{cv::Point2d(80, 60), 2});
         const auto multiple = auto_buff::solve_rune_pose({}, intrinsic, distortion, camera_transform, icons, boards);
-        require(multiple && (multiple->center_odom - Eigen::Vector3d(5, 0, 0)).norm() < .05,
+        require(multiple && (multiple->center_in_world - Eigen::Vector3d(5, 0, 0)).norm() < .05,
                 "Higher-scored false R displaced the geometrically valid candidate");
         require(!auto_buff::solve_rune_pose({}, intrinsic, distortion, camera_transform, {}, boards), "Pose initialized without R");
         auto active = boards;
@@ -295,7 +301,7 @@ int main()
         require(!auto_buff::solve_rune_pose({}, intrinsic, distortion, camera_transform, icons, active), "Hit rings initialized PnP");
         boards.front().corners.fill({});
         require(!auto_buff::solve_rune_pose({}, intrinsic, distortion, camera_transform, icons, boards), "Collapsed endpoints initialized PnP");
-        std::cout << "center_m=" << pose->center_odom.transpose() << " angle_rad=" << pose->rotation_angle
+        std::cout << "center_m=" << pose->center_in_world.transpose() << " angle_rad=" << pose->rotation_angle
                   << " R_reprojection_px=" << error << '\n';
     });
 }

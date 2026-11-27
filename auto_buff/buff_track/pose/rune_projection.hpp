@@ -20,15 +20,15 @@ inline constexpr auto kPsi = 5;
 // 0 为 R，1～5 为符板中心；pose 和 track 使用完全相同的几何投影。
 struct RuneObservable
 {
-    cv::Mat intrinsic;
-    cv::Mat distortion;
-    Eigen::Isometry3d camera_to_world = Eigen::Isometry3d::Identity();
+    cv::Mat camera_matrix;
+    cv::Mat distort_coeffs;
+    Eigen::Isometry3d T_camera2world = Eigen::Isometry3d::Identity();
 
     static constexpr int kFeatureIcon  = 0;
     static constexpr int kFeatureCount = 6;
 
-    std::array<Eigen::Vector2d, kFeatureCount> projected; // 原图像素；不可见点置零。
-    std::array<Eigen::Vector3d, kFeatureCount> in_camera; // RMCS 前/左/上相机系，单位米。
+    std::array<Eigen::Vector2d, kFeatureCount> points_in_image;  // 原图像素；不可见点置零。
+    std::array<Eigen::Vector3d, kFeatureCount> points_in_camera; // RMCS 前/左/上相机系，单位米。
     std::array<bool, kFeatureCount> visible;              // 投影有效且光学深度大于 0.1 m。
 
     /**

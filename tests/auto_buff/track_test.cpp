@@ -14,30 +14,18 @@ int main() {
         tests::TemporaryDirectory directory;
         const auto temporary = directory.path;
         auto camera = temporary / "camera.yaml";
-        std::ofstream(camera) << "image_width: 960\nimage_height: "
-                                 "540\ncamera_matrix: "
-                                 "[900.,0.,480.,0.,900.,270.,0.,0.,1.]\ndistortion:"
-                                 " [0.,0.,0.,0.,0.]\n";
+        std::ofstream(camera) << "calibration: {"
+                                 "camera_matrix: [900,0,480,0,900,270,0,0,1], distort_coeffs: [0,0,0,0,0]}\n"
+                                 "handeye_calibration: {R_camera2gimbal: [0,0,1,-1,0,0,0,-1,0], "
+                                 "t_camera2gimbal: [0,0,0], R_gimbal2imubody: [1,0,0,0,1,0,0,0,1]}\n";
         auto hik = temporary / "hikcamera.yaml";
         std::ofstream(hik) << "camera: {exposuretime: 4000, gain: 15}\n"
-                              "calibration: {image_width: 960, image_height: 540, camera_matrix: "
+                              "calibration: {camera_matrix: "
                               "[900,0,480,0,900,270,0,0,1], distort_coeffs: [0,0,0,0,0]}\n"
                               "handeye_calibration: {R_camera2gimbal: [0,0,1,-1,0,0,0,-1,0], "
-                              "t_camera2gimbal: [0.1,0.2,0.3]}\n";
+                              "t_camera2gimbal: [0.1,0.2,0.3], R_gimbal2imubody: [1,0,0,0,1,0,0,0,1]}\n";
         const cv::Mat image = cv::Mat::zeros(540, 960, CV_8UC3);
         std::array<double, 9> k{900, 0, 480, 0, 900, 270, 0, 0, 1};
-        // mas_vision 的原始相机 YAML 没有图像宽高，仍须能直接读取并完成位姿初始化。
-        auto host_yaml = YAML::LoadFile(hik.string());
-        host_yaml["calibration"].remove("image_width");
-        host_yaml["calibration"].remove("image_height");
-        const auto host_camera = temporary / "host_camera.yaml";
-        std::ofstream(host_camera) << host_yaml;
-        auto_buff::RmcsTracker host_tracker(host_camera, YAML::Node{});
-        const auto host_state = host_tracker.update(
-            synthetic(0, k, Eigen::Quaterniond::Identity(), Eigen::Vector3d(.1, .2, .3)), 0, image);
-        require(host_state.initialized &&
-                    cv::norm(cv::Vec3d(host_state.state.x - 5, host_state.state.y, host_state.state.z)) < .05,
-                "Host calibration without image dimensions cannot initialize the RMCS model");
         auto_buff::RmcsTracker calibrated_tracker(hik, YAML::Node{});
         const auto calibrated = calibrated_tracker.update(
             synthetic(0, k, Eigen::Quaterniond::Identity(), Eigen::Vector3d(.1, .2, .3)), 0, image);
@@ -114,7 +102,7 @@ int main() {
         require(state.future.size() == 5, "RMCS must predict all five board slots");
         // 相机转动、手眼有平移且 IMU 基不同，空间神符中心仍应固定在已知世界位置。
         const auto moving_camera = temporary / "moving_camera.yaml";
-        std::ofstream(moving_camera) << "calibration: {image_width: 960, image_height: 540, camera_matrix: "
+        std::ofstream(moving_camera) << "calibration: {camera_matrix: "
                                         "[900,0,480,0,900,270,0,0,1], distort_coeffs: [0,0,0,0,0]}\n"
                                         "handeye_calibration:\n"
                                         "  R_camera2gimbal: [0,0,1,-1,0,0,0,-1,0]\n"

@@ -64,10 +64,8 @@ int main()
             require(!target, "Synthetic sample unexpectedly bypassed tracker warm-up");
             const auto packet = receive();
             require(packet["handeye"]["valid"].get<bool>(), "Raw hand-eye sample was gated on EKF readiness");
-            require(std::abs(packet["r"].get<double>() - packet["radius_02"].get<double>()) < 1e-12 &&
-                        std::abs(packet["l"].get<double>() -
-                                 (packet["radius_13"].get<double>() - packet["radius_02"].get<double>())) < 1e-12,
-                    "Legacy Plotter r/l no longer represent radius_02 and the radius difference");
+            require(packet.size() == 1 && packet.contains("handeye"),
+                    "Track output contains non-calibration diagnostics");
             require(!packet["handeye"]["armor_big"].get<bool>(), "Small armor hand-eye sample marked as big");
             for (int i = 0; i < 4; ++i)
             {
@@ -84,9 +82,14 @@ int main()
             armors.clear();
             tracker.track(armors, time + std::chrono::milliseconds(20), cv::Mat::zeros(1024, 1280, CV_8UC3));
             const auto missing = receive();
-            require(!missing["handeye"]["valid"].get<bool>() && !missing["raw_pnp"]["valid"].get<bool>() &&
-                        missing["pnp_success_count"] == 0 && missing["handeye"]["p0"]["x"] == 0,
-                    "Missing observation retained old calibration/PnP fields");
+            require(!missing["handeye"]["valid"].get<bool>(), "Missing observation retained a valid hand-eye sample");
+            for (int i = 0; i < 4; ++i)
+            {
+                const auto &point = missing["handeye"]["p" + std::to_string(i)];
+                require(point["x"] == 0 && point["y"] == 0, "Missing observation retained old hand-eye corners");
+            }
+            require(packet["handeye"].size() == missing["handeye"].size(),
+                    "Hand-eye output fields changed when observation was missing");
             observed.xyz_in_world = {3, 0, 0};
             observed.ypr_in_world = {0, 0, 0};
             auto_aim::Target moving(observed, time, .2, .2, 0, 4, Eigen::VectorXd::Constant(11, .01));

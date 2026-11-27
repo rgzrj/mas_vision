@@ -25,7 +25,7 @@ synthetic(double time, const std::array<double, 9> &intrinsics,
     auto project = [&](const Eigen::Vector3d &local) {
         Eigen::Vector3d camera =
             camera_orientation.conjugate() * (Eigen::Vector3d(5, 0, 0) + local - camera_translation);
-        auto ocv = rm_utils::util::ros2opencv_position(camera);
+        auto ocv = rm_utils::util::flu2opencv_position(camera);
         std::vector<cv::Point2d> projected;
         cv::projectPoints(std::vector<cv::Point3d>{{ocv.x(), ocv.y(), ocv.z()}}, cv::Vec3d{}, cv::Vec3d{}, k,
                           cv::Mat(), projected);

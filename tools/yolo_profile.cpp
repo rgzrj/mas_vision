@@ -1,4 +1,4 @@
-#include "rm_utils/yolo_timing.hpp"
+#include "auto_buff/buff_detect/yolo/timing.hpp"
 #include "auto_buff/buff_detect/yolo/yolo.hpp"
 #include "rm_utils/io/media_reader.hpp"
 #include <iostream>
@@ -86,7 +86,7 @@ int main(int argc, char *argv[])
         cv::setNumThreads(1);
         auto_buff::YoloDetector detector(config, config_path.parent_path());
         detector.disable_debug(); // 测速不构建图元，也不调用显示编码。
-        rm_utils::start_tracy();  // YAML 已校验开启；测试入口管理客户端生命周期。
+        auto_buff::start_tracy(); // YAML 已校验开启；测试入口管理客户端生命周期。
         tool::MediaReader reader(resolve(config["input"]["path"].as<std::string>()),
                                  config["input"]["type"].as<std::string>("video"));
         std::filesystem::create_directories(output);
@@ -121,7 +121,7 @@ int main(int argc, char *argv[])
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             const double elapsed =
                 std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-            const auto timing = rm_utils::yolo_timing;
+            const auto timing = auto_buff::yolo_timing;
             FrameMark;
             if (i < warmup)
                 continue;

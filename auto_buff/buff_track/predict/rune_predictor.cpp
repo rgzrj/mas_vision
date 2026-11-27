@@ -61,14 +61,15 @@ void RunePredictor::correct(int pending_count, int active_count, rm_utils::Times
     }
 }
 
-auto predict_rune_features(const RuneState &state, double seconds, const cv::Mat &intrinsic, const cv::Mat &distortion,
-                           const Eigen::Isometry3d &transform) -> std::vector<RuneAddition::Tracked>
+auto predict_rune_features(const RuneState &state, double seconds, const cv::Mat &camera_matrix,
+                           const cv::Mat &distort_coeffs, const Eigen::Isometry3d &transform)
+    -> std::vector<RuneAssociation::Tracked>
 {
     // 修改状态副本，不能影响 tracker 正在使用的当前状态。
     auto future = state;
     future.transition(seconds);
 
-    auto result     = std::vector<RuneAddition::Tracked>{};
+    auto result     = std::vector<RuneAssociation::Tracked>{};
     const auto face = Eigen::AngleAxisd(future.face_yaw, Eigen::Vector3d::UnitZ());
     const auto q    = Eigen::Quaterniond(transform.rotation());
     const auto t    = Eigen::Vector3d(transform.translation());
@@ -79,11 +80,12 @@ auto predict_rune_features(const RuneState &state, double seconds, const cv::Mat
         const Eigen::Vector3d local(0, -kRuneGlobalRadius * std::sin(angle), kRuneGlobalRadius * std::cos(angle));
         const Eigen::Vector3d world     = Eigen::Vector3d(future.x, future.y, future.z) + face * local;
         const Eigen::Vector3d in_camera = q.conjugate() * (world - t);
-        const auto ocv                  = rm_utils::util::ros2opencv_position(in_camera);
+        const auto ocv                  = rm_utils::util::flu2opencv_position(in_camera);
 
-        if (ocv.z() <= 0.1)
+        if (!ocv.allFinite() || ocv.z() <= 0.1)
             continue;
-        if (auto point = rm_utils::util::reproject_point(ocv, intrinsic, distortion))
+        if (auto point = rm_utils::util::reproject_point(ocv, camera_matrix, distort_coeffs);
+            point && std::isfinite(point->x) && std::isfinite(point->y))
             result.push_back({slot + 1, *point});
     }
 

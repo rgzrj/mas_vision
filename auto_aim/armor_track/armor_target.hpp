@@ -60,15 +60,6 @@ class Target
     bool update(const Armor &armor);
 
     /**
-     * @brief 获取上一帧更新的 z 方向新息
-     */
-    double last_innovation_z() const { return last_innovation_z_; }
-    /**
-     * @brief 获取上一帧更新的位移新息
-     */
-    double last_innovation_norm() const { return last_innovation_norm_; }
-
-    /**
      * @brief 获取 EKF 状态向量
      */
     Eigen::VectorXd ekf_x() const { return ekf_.x; }
@@ -131,9 +122,6 @@ class Target
                                    std::numeric_limits<double>::quiet_NaN(),
                                    std::numeric_limits<double>::quiet_NaN()}};
     std::array<double, 3> plate_dz_{{0.0, 0.0, 0.0}};
-
-    double last_innovation_z_    = 0.0;       // 上一帧更新的 z 方向新息
-    double last_innovation_norm_ = 0.0;       // 上一帧更新的位移新息
 
     std::array<int, 2> group_visits_{{0, 0}}; // 两组独立装甲板访问次数
 

@@ -3,7 +3,7 @@ add_library(rm_utils STATIC
     algorithm/trajectory.cpp
     algorithm/reprojection.cpp
     algorithm/extended_kalman_filter.cpp
-    algorithm/buff/rune_energy_fitter.cpp
+    algorithm/rune_energy_fitter.cpp
 )
 vision_target_options(rm_utils)
 target_include_directories(rm_utils PUBLIC

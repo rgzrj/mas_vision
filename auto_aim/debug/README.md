@@ -44,6 +44,6 @@
 
 回放调用同一套生产算法。`playback.display=false` 关闭算法的图像调试，Plotter 开关保持独立。回放结果结构位于 `apps/replay/armor_process.hpp`，不进入实机链路；火控直接返回公共 `SendPacket`，串口仍发送包含 found 的 13 字节帧。
 
-`armor_track.plotter_enable` 和 `armor_shoot.plotter_enable` 在生产算法中控制 UDP Plotter，沿用原 MAS 字段。track 的 handeye 数据包含原始四角点与同帧 `R_gimbal2world`，不以 EKF 进入 tracking 为条件；图像 debug 全关仍可采集，缺姿态时不生成标定样本。
+`armor_track.plotter_enable` 和 `armor_shoot.plotter_enable` 在生产算法中控制 UDP Plotter。track 仅输出手眼标定数据，shoot 保留原有输出。handeye 数据包含原始四角点与同帧 `R_gimbal2world`，不以 EKF 进入 tracking 为条件；图像 debug 全关仍可采集，缺姿态时不生成标定样本。
 
 接收工具为 `tools/plot_monitor.py`：`--no-gui` 只用标准库记录 CSV，GUI 使用 pyqtgraph/PyQt5。结果保存在 `output/profiling/plotter`，手眼求解入口为主程序 `calibrate_handeye`。

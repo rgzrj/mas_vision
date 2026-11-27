@@ -48,7 +48,7 @@ bool TraditionalDetector::submit(const cv::Mat &image, double seconds, RuneMode 
     if (pending_)
         return false;
 
-    auto result    = detect_impl(image);
+    auto result    = detect_impl(image, mode);
     result.image   = image;
     result.seconds = seconds;
     result.mode    = mode;
@@ -62,7 +62,7 @@ std::optional<BuffDetector::Detection> TraditionalDetector::collect_impl()
     return std::exchange(pending_, std::nullopt);
 }
 
-BuffDetector::Detection TraditionalDetector::detect_impl(const cv::Mat &image)
+BuffDetector::Detection TraditionalDetector::detect_impl(const cv::Mat &image, RuneMode mode)
 {
     if (image.empty() || image.type() != CV_8UC3)
         throw std::runtime_error("RMCS traditional detector needs a BGR image");
@@ -83,7 +83,9 @@ BuffDetector::Detection TraditionalDetector::detect_impl(const cv::Mat &image)
         Board board;
         board.center         = {target.center.x, target.center.y};
         board.color          = target_color;
-        board.appearance     = target.active ? Appearance::single_ring : Appearance::full_mark;
+        board.appearance     = Appearance::full_mark;
+        if (target.active)
+            board.appearance = mode == RuneMode::big ? Appearance::big_activated : Appearance::single_ring;
         board.source         = "rmcs_traditional";
         board.pvd            = target.score;
         board.features_valid = !target.active;

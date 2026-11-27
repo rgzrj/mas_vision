@@ -1,6 +1,6 @@
 #pragma once
 
-#include "auto_buff/buff_track/buff_state.hpp"
+#include "auto_buff/buff_track/track_types.hpp"
 
 #include <Eigen/Geometry>
 #include <memory>
@@ -61,7 +61,7 @@ public:
     /// 原始 EKF 后验及 P 对角项，只读导出，不使用运动拟合结果替代。
     auto ekf_snapshot() const noexcept -> RuneEkfSnapshot;
     /// 返回模型持有的本帧关联观测和校正前投影，不复制缓存。
-    auto addition() const -> const RuneAddition &;
+    auto association() const -> const RuneAssociation &;
 
 private:
     struct Impl;

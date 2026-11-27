@@ -1,367 +1,599 @@
-# 打符跟踪：从图像到空间，再投影回图像
+# 打符跟踪
 
-依据本工程 2026-10-29 的实际源码编写。本文面向第一次接触 PnP、旋转矩阵和 EKF 的读者。先读第1～8节打通坐标链，再读滤波与预测。公式描述当前实现，不代表实际相机和机械标定已经验收。
+## 符面姿态解算
 
-## 1. 先知道整个程序在做什么
+### 坐标系定义
 
-相机提供二维点；PnP结合已知物理尺寸求初始空间位姿；跟踪器保持空间状态，并将它投影回图像，与新检测比较、校正。不能仅凭一个像素点直接得到三维距离。
+| 坐标系 | 原点 | X 轴 | Y 轴 | Z 轴 | 说明 |
+|---|---|---|---|---|---|
+| **符面局部系** $\{S\}$ | 所有符板共同围绕的转轴中心 O | 垂直符板平面，从正面穿向背面 | 正视零位符板时向左 | 正视零位符板时向上 | 零角度靶心位于 O 的正上方，符板绕 X 轴转动 |
+| **OpenCV 光学相机系** $\{O\}$ | 相机光心 | 图像右侧 | 图像下方 | 沿光轴向前 | OpenCV PnP、投影使用此轴约定 |
+| **内部相机 FLU 系** $\{C\}$ | 相机光心 | 沿光轴向前 | 向左 | 向上 | 与光学系原点相同，只有轴向不同 |
+| **云台系** $\{G\}$ | 云台转轴中心 | 云台向前 | 云台向左 | 云台向上 | 相机手眼标定的目标系 |
+| **IMU 体系** $\{I\}$ | IMU 中心 | 按电控约定 | 按电控约定 | 按电控约定 | 由 `R_gimbal2imubody` 连接云台体轴 |
+| **世界系** $\{W\}$ | 当前云台中心 | 项目参考前方 | 项目参考左方 | 项目参考上方 | 朝向由 IMU 及固定换基确定；代码未加入底盘平移里程计 |
 
-```mermaid
-flowchart LR
-    A[原图像素 R与四端点] --> B[PnP 初始位姿]
-    B --> C[OpenCV相机系]
-    C --> D[RMCS相机系]
-    D --> E[手眼与曝光时刻IMU]
-    E --> F[世界系状态与EKF]
-    F --> G[五个板位的空间位置]
-    G --> H[逆外参转回相机]
-    H --> I[内参和畸变投影到原图]
-    I --> J[关联并校正]
-    J --> F
-```
+FLU 是 Forward、Left、Up，即前、左、上。符面局部系和相机系采用相同的右手轴约定，**不表示它们的原点或朝向相同**。
 
-| 源码 | 阅读时关注什么 |
-|---|---|
-| [pose/rune_camera.cpp](pose/rune_camera.cpp) | 位姿模块内部读取相机标定、IMU基变换、动态手眼外参 |
-| [track/buff_tracker.cpp](track/buff_tracker.cpp) | 观测组织、模型生命周期及位姿模块调用 |
-| [pose/rune_pose.cpp](pose/rune_pose.cpp) | R与种子板选择、PnP、几何筛选、初始角度 |
-| [pose/rune_projection.cpp](pose/rune_projection.cpp) | 世界特征→相机→像素的实际观测函数 |
-| [track/rune_model.cpp](track/rune_model.cpp) | 状态、EKF预测、像素关联与校正 |
-| [predict/rune_state.cpp](predict/rune_state.cpp) | 恒速/正弦积分、未来点、空间瞄准点 |
-| [buff_state.hpp](buff_state.hpp) | 公共状态及单位 |
-| [conversion.hpp](../../rm_utils/algorithm/conversion.hpp) | OpenCV与RMCS换轴 |
-| [orientation.hpp](../../rm_utils/algorithm/orientation.hpp) | IMU双侧基变换及四元数插值 |
-| [pose/rune_pnp.cpp](pose/rune_pnp.cpp) | PnP点序、求解、结果换轴 |
+#### 转动中心是谁？法线在哪里？
 
-**先分清三个“中心”：**机构中心是五块符板旋转所绕的中心；R标的三维位置沿法线突出0.1m，并不恰在该中心；每块符板还有自己的靶心。`state.x/y/z`表示机构中心，不是R标中心，也不是某一块符板中心。
+**转动中心 O，就是所有符板共同围绕的那个轴心。** 把整个能量机关想成一个大风车：每块符板的靶心沿圆周运动，圆周中间不跟着符板转圈的点就是 O。它不是某块符板的小圆中心。
 
-## 2. 符号与最少的数学基础
+**法线就是垂直于符板转动平面的方向。** 把符板转动的平面想成一张纸，一根笔垂直穿过这张纸，笔的方向就是法线。它不是画面里从 R 连向某块符板的灯臂方向。
 
-本书统一用列向量：
+![符面局部坐标系的正视图与侧视图](images/rune_local_frame.png)
 
-$$
-p_A=R_{A\leftarrow B}p_B+t_{A\leftarrow B}.
-$$
+图中的三个点分别是：
 
-读法：把“B坐标系表示的同一个点”转换成“A坐标系表示”。旋转矩阵是3×3，点和平移是3×1；平移是B原点在A系的位置。这里是描述坐标的变化，不是命令机器人真的移动。
-
-- 旋转只改变朝向；平移改变原点。方向向量只乘旋转，空间点还要加平移。
-- 连乘从右往左执行：`R_AB * R_BC * p_C`先从C到B，再从B到A，顺序不能交换。
-- 正交旋转矩阵满足 $R^{-1}=R^T$、$R^TR=I$、$\det R=1$。
-- 长度用m，像素用px，角度用rad，时间用s；$180^\circ=\pi\,rad$。配置中少数门限以degree存储，源码会换算。
-
-若需要连同平移一起写：
-
-$$
-T_{A\leftarrow B}=\begin{bmatrix}R_{A\leftarrow B}&t_{A\leftarrow B}\\0&1\end{bmatrix},\quad
-\begin{bmatrix}p_A\\1\end{bmatrix}=T_{A\leftarrow B}\begin{bmatrix}p_B\\1\end{bmatrix}.
-$$
-
-逆变换**先减平移再逆旋转**：
-
-$$p_B=R_{A\leftarrow B}^T(p_A-t_{A\leftarrow B}).$$
-
-例如相机原点在世界系的 $(1,0,0)$，且无旋转，世界点 $(4,0,0)$在相机里就是$(3,0,0)$，不是$(5,0,0)$。
-
-## 3. 本项目究竟有哪几个坐标系
-
-| 记号 | 名称 | 轴/原点约定 |
+| 标记 | 对应什么 | 当前代码的定义 |
 |---|---|---|
-| I | 原图像素系 | 左上为原点，u向右、v向下；只有二维位置 |
-| O | OpenCV光学相机系 | 原点在光心，X向右、Y向下、Z向前 |
-| C | RMCS内部相机系 | 同一光心，x向前、y向左、z向上 |
-| G | 云台参考系 | 手眼标定目标系，采用项目约定的前/左/上轴 |
-| B | IMU本体基 | 串口姿态采用的基，借助 `R_gimbal2imubody` 与G基联系 |
-| W | 跟踪世界/odom系 | 姿态经基变换后的参考系；不是地理坐标，也没有底盘平移里程计 |
-| S | 符机构局部系 | 机构中心为原点，x指背面，y/z位于符面；初始种子板在+z侧 |
+| O | 所有符板共同的转动中心 | 符面局部坐标原点 $(0,0,0)$，`RuneState.x/y/z` 表示它的世界坐标 |
+| R | 画面里发光的 R 标中心 | 局部 $(-0.1,0,0)$；当前模型假设它在 O 的正面一侧，突出 0.1 m |
+| C | 某块符板上要击打的靶心 | 距 O 为 0.7 m，随符板绕轴转动 |
 
-C与O只是换轴，**光心相同，没有平移**。G原点与光心不重合，才需要手眼平移。W的轴随配置和IMU参考定义，并不保证“x永远朝目标”。
+**R 标与 O 有什么关系？** 在当前物理模型中，O 位于 R 标后方 0.1 m。正对机构看时，两者在图像上的投影可以重合；从侧面看则是不同的两个点。这里的 0.1 m 来自 `kRuneIconProminentDistance`，是模型尺寸假设，不是从单张图片直接测出来的。
 
-### 3.1 最容易踩坑的实际边界
+符面局部系的轴按下面的方式摆放：
 
-当前动态外参只包含“云台旋转＋相机相对云台的固定偏移”。代码没有接收机器人在场地中的位置，因此不能声称已消除底盘平移。可把它理解为有世界参考朝向、但平移原点按当前云台原点建模的坐标表达；机器人平移需要由目标状态重新估计，或后续接入里程计。
+- **+X**：从 O 垂直穿向机构背面，沿转轴方向；正视时指向纸内。
+- **+Y**：零位正视图中向左。
+- **+Z**：零位正视图中向上，参考符板的靶心在这条轴上。
 
-## 4. 第一步：像素和相机内参
+“零角度”是模型规定的参考位置，不要求第一帧的靶心恰好就在图像正上方。实际姿态通过 PnP 求出；符面局部轴也不等于当前图像的水平、竖直方向。
+
+#### 坐标系之间的转换关系
+
+整体转换链与装甲板文档采用相同的读法；当前打符实现还保留一层相机轴向转换：
+
+$$
+p_{rune}\xrightarrow{\text{PnP}}p_{camera,OpenCV}
+\xrightarrow{\text{换轴}}p_{camera,FLU}
+\xrightarrow{\text{手眼}}p_{gimbal}
+\xrightarrow{\text{IMU 姿态与换基}}p_{world}
+$$
+
+与装甲板文档一致，使用列向量，$R_{A2B}$ 表示把 A 系中的向量转换为 B 系中的向量：
+
+$$
+p_B=R_{A2B}p_A+t_{A2B}
+$$
+
+其中 $t_{A2B}$ 是 **A 系原点在 B 系中的位置**。方向向量只乘旋转，空间点还要加平移。
+
+逆变换是先减平移，再逆旋转：
+
+$$
+p_A=R_{A2B}^{T}(p_B-t_{A2B})
+$$
+
+齐次变换与代码的 `Eigen::Isometry3d` 对应：
+
+$$
+T_{A2B}=\begin{bmatrix}R_{A2B}&t_{A2B}\\0&1\end{bmatrix}
+$$
+
+位置单位为米，像素为 px，内部角度为弧度，时间为秒。配置中的 `init_pitch_bound` 和 `diverge_face_angle` 使用度，进入计算时再换算。
+
+#### 已知物理点与图像点序
+
+物理尺寸定义在 [buff_types.hpp](../buff_types.hpp)：
+
+| 符号 | 含义 | 当前值 |
+|---|---|---|
+| $r$ | 机构中心到靶心的距离 | 0.7 m |
+| $a$ | 靶心到十字端点的距离 | 0.15 m |
+| $d$ | R 相对符板平面的突出距离 | 0.1 m |
+
+初始化时，以作为种子的待击板为零角度板，使用以下五个三维点：
+
+$$
+P_{icon}=\begin{bmatrix}-d\\0\\0\end{bmatrix},\quad
+P_T=\begin{bmatrix}0\\0\\r+a\end{bmatrix},\quad
+P_L=\begin{bmatrix}0\\a\\r\end{bmatrix},\quad
+P_B=\begin{bmatrix}0\\0\\r-a\end{bmatrix},\quad
+P_R=\begin{bmatrix}0\\-a\\r\end{bmatrix}
+$$
+
+PnP 点序为 **R 标、外端 T、左端 L、内端 B、右端 R**。其中右端 R 与机构 R 标是不同的点。
+
+`SingleRunePnpSolution::image_points(board, icon)` 根据四端点到 R 标的距离找内端、外端，再按侧向投影区分左、右。因此：
+
+- 四端点是实际灯排的物理端点，不是检测框四角。
+- “上、下”是相对机构半径方向的定义，不是图像竖直方向。
+- `board.center` 用于辅助端点排序和后续几何验证，五点 PnP 中没有额外加入靶心作为第六点。
+- 网络点序先经检测模块适配为公共观测，不能直接把网络数组下标当作 PnP 点序。
+
+#### 相机内参与像素坐标
 
 相机内参为：
 
-$$K=\begin{bmatrix}f_x&0&c_x\\0&f_y&c_y\\0&0&1\end{bmatrix}.$$
+$$
+K=\begin{bmatrix}f_x&0&c_x\\0&f_y&c_y\\0&0&1\end{bmatrix}
+$$
 
-$f_x,f_y$单位是像素，$(c_x,c_y)$是主点，不一定刚好在图像正中心。无畸变针孔模型：
+无畸变针孔模型为：
 
-$$u=f_x X_O/Z_O+c_x,\qquad v=f_y Y_O/Z_O+c_y.$$
+$$
+u=f_x\frac{X_O}{Z_O}+c_x,\qquad
+v=f_y\frac{Y_O}{Z_O}+c_y
+$$
 
-反过来，已去畸变的像素只能确定一条射线：
+$f_x,f_y$ 和主点 $c_x,c_y$ 的单位均为像素。五参数畸变按 $[k_1,k_2,p_1,p_2,k_3]$ 读取，实际投影由 OpenCV 处理。
 
-$$p_O=Z_O\begin{bmatrix}(u-c_x)/f_x\\(v-c_y)/f_y\\1\end{bmatrix}.$$
+检测点必须先撤销网络输入的缩放、填边，回到**原图像素坐标**，再使用原图内参。网络输入尺寸不是相机标定尺寸。当前相机读取代码没有按图像尺寸自动缩放内参的功能。
 
-**这里的 $Z_O$ 未知。** PnP通过多个像素与已知物理点的对应关系恢复尺度；上式不能直接对带畸变的原始像素使用。
+一个已去畸变的像素只能确定一条射线，不能单独确定三维距离：
 
-### 4.1 五参数畸变
+$$
+p_O=\lambda\begin{bmatrix}x_n\\y_n\\1\end{bmatrix},\qquad \lambda>0
+$$
 
-本项目读取 $[k_1,k_2,p_1,p_2,k_3]$。先令$x_n=X_O/Z_O$、$y_n=Y_O/Z_O$、$r^2=x_n^2+y_n^2$，则：
+PnP 结合多个图像点及已知物理尺寸，才可以恢复空间尺度。
 
-$$L=1+k_1r^2+k_2r^4+k_3r^6,$$
-$$x_d=x_nL+2p_1x_ny_n+p_2(r^2+2x_n^2),$$
-$$y_d=y_nL+p_1(r^2+2y_n^2)+2p_2x_ny_n,$$
-$$u=f_xx_d+c_x,\qquad v=f_yy_d+c_y.$$
+#### 具体转换步骤
 
-前两行在归一化平面中计算，最后才转像素。源码交给OpenCV `projectPoints`处理，无需自己手写一份替代。
+##### 1. PnP 解算：符面局部坐标系 → 相机坐标系
 
-模型输入的640×480不是相机标定尺寸。检测点必须先撤销letterbox回原图，再用原图内参。若真的把原图按$s_x,s_y$缩放，则$f_x,c_x$乘$s_x$、$f_y,c_y$乘$s_y$；裁剪还要调整主点。当前tracker会检查输入尺寸与标定尺寸一致。
+源码先将符面模型点从 FLU 换为光学轴约定，再执行 `SOLVEPNP_EPNP`，随后用 `SOLVEPNP_ITERATIVE` 优化。
 
-## 5. 第二步：PnP如何得到初始空间位姿
+定义换轴矩阵，与源码 `R_opencv2flu` 一致：
 
-### 5.1 先摆好已知物理点
-
-[buff_types.hpp](../buff_types.hpp)使用半径 $r=0.7m$、靶面端点半径 $a=0.15m$、R突出量 $d=0.1m$：
-
-| PnP顺序 | S系坐标(m) |
-|---|---|
-| R图标 | $(-d,0,0)$ |
-| T外端 | $(0,0,r+a)$ |
-| L侧端 | $(0,a,r)$ |
-| B内端 | $(0,0,r-a)$ |
-| R侧端 | $(0,-a,r)$ |
-
-表内“R图标”和“R侧端”是两个东西。图像中的五个对应点按`icon,T,L,B,R`送入PnP。深大原始网络顺序是`top,left,机构R,right,bottom`，不会原封不动当作该PnP顺序。
-
-当前PnP根据离R最远/最近找T/B，再用侧向投影区分L/R；不使用检测框四角。测量端点要对应这里的真实物理尺寸，换灯排或换机械点后必须重新确认尺寸，不能只改标签。
-
-### 5.2 PnP求的是“符局部→相机”
-
-每个物理点先从S的RMCS轴转换为OpenCV式的局部轴（下一节给换轴矩阵），再与原图像素配对：
-
-$$p_{O,i}=R_{O\leftarrow S_O}p_{S_O,i}+t_{O\leftarrow S_O},\qquad
-z_i=\pi(K,D,p_{O,i}).$$
-
-$\pi$表示投影函数，$D$表示畸变。求解器寻找使投影贴近观测的R和t；可以用下式理解误差目标，不代表EPNP本身按此逐步迭代：
-
-$$\min_{R,t}\sum_i\|z_i-\pi(K,D,Rp_{S_O,i}+t)\|^2.$$
-
-源码先EPNP，再ITERATIVE细化，`Rodrigues(rvec)`将旋转向量转成矩阵。**t是机构原点在相机系的位置，不是“相机在机构系的位置”。**
-
-PnP之后还要检查深度、五点重投影、符面倾角、法线朝向和其他待击板布局；`solvePnP`返回true不等于空间结果一定正确。当前初始化沿用1～2块待击板的限制，已击打圆环不能单独初始化。
-
-## 6. 第三步：OpenCV与RMCS换轴
-
-源码常量为：
-
-$$A=\begin{bmatrix}0&0&1\\-1&0&0\\0&-1&0\end{bmatrix}.$$
+$$
+A=R_{opencv2flu}=\begin{bmatrix}0&0&1\\-1&0&0\\0&-1&0\end{bmatrix}
+$$
 
 于是：
 
-$$p_C=Ap_O=(Z_O,-X_O,-Y_O)^T,$$
-$$p_O=A^Tp_C=(-y_C,-z_C,x_C)^T.$$
+$$
+p_C=Ap_O=(Z_O,-X_O,-Y_O)^T,\qquad
+p_O=A^Tp_C=(-y_C,-z_C,x_C)^T
+$$
 
-例如光学系$(0.2,-0.1,3)$表示右0.2m、上0.1m、前3m；内部相机系变为$(3,-0.2,0.1)$。
+PnP 使用的物体点是 $p_{S_O}=A^Tp_S$，输出满足：
 
-PnP的输入物体轴和输出相机轴都采用OpenCV式，转换旋转要两边一起换：
+$$
+p_O=R_{pnp}p_{S_O}+t_{pnp},\qquad
+R_{pnp}=\operatorname{Rodrigues}(rvec)
+$$
 
-$$R_{C\leftarrow S}=A R_{O\leftarrow S_O} A^T,\qquad
- t_{C\leftarrow S}=A t_{O\leftarrow S_O}.$$
+恢复为本模块的 FLU 位姿：
 
-只有向量换轴才是左乘A；旋转算子的输入与输出基都变了，所以是$A R A^T$。这就是`opencv2ros_rotation`与`opencv2ros_position`写法不同的原因。
+$$
+R_{rune2camera}=A R_{pnp}A^T,\qquad
+\texttt{xyz\_in\_camera}=A t_{pnp}
+$$
 
-## 7. 第四步：手眼标定＋IMU，得到相机到世界
+**为什么旋转矩阵两侧都要乘？** 这里同时改变了物体轴和相机轴；位置向量只需要左乘 $A$，旋转矩阵需要两侧换基。
 
-### 7.1 手眼配置的含义
+符面局部系原点是机构中心，因此 `xyz_in_camera` 是机构中心在相机 FLU 系中的位置，不是相机在符面系中的位置。
 
-记YAML里的：
+代码入口对应：
 
-$$H=R_{G\leftarrow O}=\texttt{R\_camera2gimbal},\qquad
- t_{GO}=\texttt{t\_camera2gimbal}.$$
+```cpp
+SingleRunePnpSolution pnp;
+if (!pnp.solve(board, icon.center, camera_matrix, distort_coeffs))
+    return std::nullopt;
 
-H接收OpenCV光学系向量，输出云台系向量；平移单位m，表示光心在云台系的位置。它们不是云台到相机的逆外参。YAML的9个数字按行排列。
-
-由于程序内部已经使用C系，需要：
-
-$$R_{G\leftarrow C}=H A^T.$$
-
-平移原点没有换，不需要再乘A；`t_camera2gimbal`本来就在G系。
-
-### 7.2 IMU使用的是双侧基变换
-
-令$B$为配置`R_gimbal2imubody`，$Q(t)$为串口姿态四元数对应的旋转矩阵。当前`gimbal_orientation`实际执行：
-
-$$R_{W\leftarrow G}(t)=B^T Q(t) B.$$
-
-四元数形式：
-
-$$q_g=q_B^{-1}\otimes q_{imu}\otimes q_B.$$
-
-这里**不是**简单的$q_{imu}\otimes q_B$：按当前串口约定，姿态的输入、输出参考基一起转换。以后换IMU协议时必须重新核对，不能把此式当成所有IMU通用公式。
-
-四元数补充：单位四元数用共轭等于求逆；Eigen构造函数为`Quaterniond(w,x,y,z)`，但`coeffs()`排列是x/y/z/w；$q$与$-q$表示相同旋转。时间插值前选择最短路径，再用SLERP，不直接逐项线性插值欧拉角。
-
-### 7.3 组合成当前帧外参
-
-$$R_{W\leftarrow C}=R_{W\leftarrow G}H A^T,$$
-$$t_{W\leftarrow C}=R_{W\leftarrow G}t_{GO}.$$
-
-因此完整坐标链为：
-
-$$\boxed{p_W=R_{W\leftarrow G}(H A^T p_C+t_{GO})}.$$
-
-从光学系直接出发也可写为：
-
-$$\boxed{p_W=R_{W\leftarrow G}(H p_O+t_{GO})}.$$
-
-对照源码`set_imu_orientation`：先得到gimbal姿态，再旋转手眼的朝向**和平移**。只旋转朝向、不旋转相机偏移，会导致云台转动时目标位置漂移。
-
-通用机器人链应还有云台原点的世界平移$t_{WG}$：$p_W=R_{WG}(Hp_O+t_{GO})+t_{WG}$。**当前实现没有这一项，等价于在本轮建模中取$t_{WG}=0$。**
-
-固定相机离线回放可使用`fixed_gimbal_to_world_quaternion_wxyz`；不采用手眼时，也可直接配置内部C→W的`camera_to_world_*`。两种配置不能混填。离线固定外参不能替代手持/运动相机的逐帧姿态。
-
-### 7.4 用一个数字例子验证顺序
-
-假设$H=A$（理想安装），$t_{GO}=(0.1,0,0)^T$；光学点$(0.2,-0.1,3)^T$先变成云台系$(3.1,-0.2,0.1)^T$。若云台绕世界z轴转$90^\circ$：
-
-$$R_z(90^\circ)=\begin{bmatrix}0&-1&0\\1&0&0\\0&0&1\end{bmatrix},\quad
-p_W=(0.2,3.1,0.1)^T.$$
-
-反算时先乘$R_z^T$，再减$(0.1,0,0)$，最后乘$H^T$，应还原$(0.2,-0.1,3)$。这些是教学数字，不是本机标定值。
-
-## 8. 第五步：从PnP位姿得到跟踪状态
-
-设PnP换轴后得到$R_{CS},t_{CS}$，则：
-
-$$c_W=R_{WC}t_{CS}+t_{WC},\qquad R_{WS}=R_{WC}R_{CS}.$$
-
-$c_W$就是`state.x/y/z`。取$R_{WS}$第一列为符面法线$n$：
-
-$$\psi=\operatorname{atan2}(n_y,n_x),\qquad
-\beta=\arcsin(|n_z|).$$
-
-$\beta$用于倾角验证；跟踪只保留符面偏航$\psi$，并不维护完整六自由度符面姿态。若实际符面大幅倾斜，不能靠放宽门限把不适用的几何变正确。
-
-先消去偏航$R_{seed}=R_z(-\psi)R_{WS}$，源码取：
-
-$$\theta=\operatorname{atan2}(-R_{seed}[1,2],R_{seed}[2,2]).$$
-
-下标从0开始。它等价于从剩余绕x旋转中提取种子板转角，不能直接拿图像中R→板心的二维角度替代；透视和云台姿态会影响图像角度。
-
-## 9. 第六步：跟踪状态如何生成图像观测
-
-状态顺序固定为：
-
-$$s=(x,y,z,\omega,\theta,\psi)^T.$$
-
-对第$i$块板（$i=0,1,2,3,4$），角度相差$72^\circ$：
-
-$$\alpha_i=\theta+2\pi i/5,$$
-$$l_i=(0,-r\sin\alpha_i,r\cos\alpha_i)^T,$$
-$$p_{W,i}=c_W+R_z(\psi)l_i.$$
-
-R标对应局部点$l_R=(-d,0,0)^T$，也先绕符面偏航再加机构中心。符面转角$\theta$不改变R位置。
-
-接着逐步逆变换：
-
-$$p_{C,i}=R_{WC}^T(p_{W,i}-t_{WC}),$$
-$$p_{O,i}=A^Tp_{C,i},$$
-$$\hat z_i=\pi(K,D,p_{O,i}).$$
-
-这是`RuneObservable::update`的完整观测函数$h_i(s)$。内部相机系的“前方”是x正方向，换回OpenCV后才检查Z深度；当前实现要求光学深度大于0.1m。
-
-## 10. 第七步：EKF为何能减少抖动
-
-EKF不把每帧PnP结果直接平均；初始化后主要比较**R和符板中心的二维像素观测**，通过空间模型调整状态。四端点主要服务于初始化和几何检查。
-
-### 10.1 预测：先按运动模型猜下一帧
-
-$$\theta^-_{k}=\theta_{k-1}+\omega_{k-1}\Delta t,$$
-
-其余状态按当前模型保持，$\psi$规范到角度区间。$\Delta t$取相邻曝光/媒体时间，不能拿循环耗时代替。
-
-$$F=I,\quad F_{\theta,\omega}=\Delta t,\qquad P^-=FPF^T+Q.$$
-
-$P$是状态不确定度，$Q$是过程噪声。当前源码直接加所配置Q，未额外按$\Delta t$离散化；解释参数时应以此实现为准。
-
-### 10.2 关联：哪个检测对应哪个板位
-
-$$e_{ij}=z_i-h_j(s^-),\quad S_j=H_jP^-H_j^T+R_{obs},$$
-$$d_{ij}^2=e_{ij}^TS_j^{-1}e_{ij}.$$
-
-这叫平方马氏距离：同样的像素偏差，在不确定度大时与不确定度小时意义不同。匈牙利匹配选择对应关系并拒绝超门限候选；R只能匹配R，板心只能匹配五个板位。检测数组下标不等于固定板位编号。
-
-### 10.3 校正：用残差纠正状态
-
-$$K=P^-H^T(HP^-H^T+R_{obs})^{-1},$$
-$$s^+=s^-+K(z-h(s^-)),$$
-$$P^+=(I-KH)P^-(I-KH)^T+KR_{obs}K^T.$$
-
-这里K是卡尔曼增益，不是第4节的相机内参；实际源码还会对协方差对称化。$R_{obs}$大表示更不相信像素观测，绝不是“越小越精准”。
-
-雅可比$H=\partial h/\partial s$描述“状态变化一点，像素会变多少”。当前代码用针孔投影导数：
-
-$$J_\pi=\begin{bmatrix}f_x/Z&0&-f_xX/Z^2\\0&f_y/Z&-f_yY/Z^2\end{bmatrix},$$
-$$H\approx J_\pi A^TR_{WC}^T\frac{\partial p_W}{\partial s}.$$
-
-板位的$\partial l/\partial\theta=(0,-r\cos\alpha,-r\sin\alpha)^T$；中心三维导数为单位阵，角速度列对瞬时投影为0。**均值投影包含畸变，但此雅可比未展开畸变导数，是当前实现的近似。**
-
-### 10.4 大符正弦拟合：RMCS 状态与深大鲁棒方法的衔接
-
-输入仍是 RMCS EKF 校正后的连续转角和曝光时间，不重新计算靶心、不重复换叶补偿。恒速拟合和原来的模型选择规则保持不变；`fit_sine()` 改为参考深大 RP-26Rune 的可分离 LM–IRLS：
-
-$$\theta(t)=A\cos(\Omega\tau)+B\sin(\Omega\tau)+v\tau+C,\qquad \tau=t-t_{ref}.$$
-
-固定频率后，四个线性参数由加权最小二乘求出；内层 IRLS 用 Cauchy 权重降低异常相位影响，外层 LM 优化频率。时间与转角先去中心化，输出再恢复原来的绝对时间和速度相位定义。
-
-- 保留 RMCS 的 6 秒窗口、1.5 秒最短拟合跨度和 3 秒时间权重半衰期；正弦拟合至少需要 6 个样本。
-- 频率搜索范围仍为 1.80～2.20 rad/s；内层最多 12 次、外层最多 20 次迭代，不增加新依赖或 YAML 参数。
-- 鲁棒尺度由初始残差的 MAD 估计，并在本次频率搜索中固定，避免异常段抬高尺度、不同频率比较不同损失。
-- 对外 `cost` 仍为时间加权均方误差，保证与恒速拟合比较时口径一致；内部频率优化使用 Cauchy 损失。
-- 电控模式的处理沿用当前实现，本次没有新增按 mode 强制选择恒速或正弦模型的策略。
-
-来源记录见 [SOURCE_SZU.json](../../rm_utils/SOURCE_SZU.json)，许可证见 [LICENSE_SZU](../../rm_utils/LICENSE_SZU)。这次只借鉴拟合方法，没有移入深大的几何重建、相位换叶、弹道或调试框架。
-
-`buff_predict_test` 覆盖顺反转、离散异常点和末端短时偏移、大时间戳、频率边界，以及“像素观测 → RMCS EKF → 正弦拟合 → 未来角度”的完整算法调用。合成测试结果不能替代实机视频的命中率与帧率测试。
-
-## 11. 第八步：未来状态、瞄准角与时间
-
-恒速外推：$\theta(t+\tau)=\theta(t)+\omega\tau$。
-
-正弦角速度$\omega(t)=v+a\sin\phi(t)$、$\phi(t+\tau)=\phi(t)+\Omega\tau$，积分得到：
-
-$$\theta(t+\tau)=\theta(t)+v\tau+\frac{a}{\Omega}[\cos\phi(t)-\cos(\phi(t)+\Omega\tau)].$$
-
-$\Omega$是速度振荡的频率参数，不是机构当前转速$\omega$。源码在$|\Omega|$很小时回退恒速。未来计算只修改状态副本，不推进EKF当前后验。
-
-未来空间点仍按第9节计算。几何朝向可写为：
-
-$$yaw=\operatorname{atan2}(y,x),\quad pitch_{up}=\operatorname{atan2}(z,\sqrt{x^2+y^2}).$$
-
-但**这不是完整火控公式**：shoot还要计入弹道、飞行时间和固定延迟；本工程火控方向重建用$z=-\sin(pitch)$，其pitch正方向与上式抬头为正的几何pitch不同。不得直接用`xyz2ypd`结果替换弹道解算。串口发送目标绝对角，电控再减当前云台角；此处不再重复相减。
-
-### 时间须知
-
-一帧的图像、姿态、检测和模型时间必须绑定同一曝光时刻$t_e$。实机使用串口姿态历史对$t_e$插值，不能取推理结束时的“最新姿态”冒充。火控外推则需要考虑从$t_e$到当前及命中时刻的延迟。相机帧率、模型处理频率、结果延迟是三个不同指标。
-
-## 12. 初学者核对清单与排错
-
-| 现象 | 优先核对 |
-|---|---|
-| 云台不动时位置合理，转起来漂 | IMU基变换、曝光时间匹配、手眼平移是否随姿态旋转 |
-| 左右/上下相反 | OpenCV与RMCS换轴，旋转矩阵方向，有没有重复换轴 |
-| 距离差约1000倍 | mm与m是否混用、物理尺寸单位 |
-| 图上五点好看但PnP不稳定 | 点位是否对应真实尺寸、R突出量、点序、相机内参与图像尺寸 |
-| 偏差随画边增大 | 畸变参数、裁剪/缩放后的主点 |
-| 开始几帧正常随后越跟越偏 | 关联错误、错误中心观测、时间戳、模型假设是否适合实际运动 |
-| 有框却不初始化 | R/四端点是否完整、PnP及布局门限、仅已击打板不能初始化 |
-| 检测暂丢还在显示点 | 可能是预测；不能当成本帧真实检测 |
-
-实用的核对顺序：先静止相机检查重投影→单独绕yaw转动→单独绕pitch转动→加入相机偏移→检查动态曝光姿态。每次只改变一项。
-
-运行现有检查（工程根目录）：
-
-```powershell
-.\build\buff_pose_test.exe
-.\build\buff_track_test.exe
-.\build\buff_predict_test.exe
+const auto xyz_in_camera = pnp.result.xyz_in_camera;
+const auto q_rune2camera = pnp.result.q_rune2camera;
 ```
 
-测试使用已知合成空间点验证PnP、动态手眼/IMU、跟踪及预测。通过测试不表示实机外参、机械尺寸或串口姿态方向已自动验证。`initialized`也不等于`ready`或允许发射；当前瞄准点还有恒速3s/正弦6s预热及待击板有效期约束。仅R或圆环校正不会无限刷新待击板丢失计时。
+PnP 返回成功后，还需要验证五点重投影误差、法线朝向、符面倾角以及其他待击板布局。当前初始化要求 1～2 块待击板和至少一个 R 候选；仅有激活圆环不能初始化模型。
 
-## 13. 延伸阅读
+##### 2. 手眼标定：相机坐标系 → 云台坐标系
 
-[OpenCV相机标定与三维重建](https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html)介绍针孔、畸变与PnP。本文的坐标链、数值例子及工程边界按本项目源码推导，没有把“教材常见坐标轴”直接当作本项目约定。
+[pose/rune_camera.cpp](pose/rune_camera.cpp) 在内部读取相机 YAML：
+
+```yaml
+calibration:
+  camera_matrix: [...]       # 3×3，按行排列
+  distort_coeffs: [...]      # k1、k2、p1、p2、k3
+handeye_calibration:
+  R_camera2gimbal: [...]     # OpenCV 光学系到云台系
+  t_camera2gimbal: [...]     # 相机光心在云台系中的位置，米
+  R_gimbal2imubody: [...]    # 云台体轴到 IMU 体轴
+```
+
+这里的省略号仅表示字段结构，不能直接作为运行配置。标定板行列数、圆心距等用于生成标定结果，不参与本模块的打符 PnP。
+
+令配置中的 $H=R_{camera2gimbal}$、$t=t_{camera2gimbal}$。因为配置中的相机轴为 OpenCV 光学轴，而内部点已经是 FLU，需要：
+
+$$
+R_{C2G}=H A^T
+$$
+
+$$
+p_G=H A^T p_C+t
+$$
+
+平移 $t$ 本来就用云台系表达，不能再乘相机换轴矩阵。源码内部的 `T_camera2gimbal_` 接收的是相机 FLU 点，不能与 YAML 中的光学轴旋转直接混用。
+
+##### 3. 相似变换（旋转换基）：云台坐标系 → 世界坐标系
+
+令 $B=R_{gimbal2imubody}$，$Q$ 为串口 IMU 四元数对应的旋转矩阵。当前 `gimbal_orientation()` 使用：
+
+$$
+R_{gimbal2world}=B^T Q B
+$$
+
+与装甲板模块一样，右侧 $B$ 转换体轴，左侧 $B^T$ 转换参考轴。这里 $Q$ 的参考轴与项目世界参考轴不同，不能把左侧 $B^T$ 理解为“回到当前云台体坐标系”。该公式按当前电控与工程约定使用，不是所有 IMU 都可直接套用的通式。
+
+组合手眼外参：
+
+$$
+R_{camera2world}=R_{gimbal2world}H A^T
+$$
+
+$$
+t_{camera2world}=R_{gimbal2world}t
+$$
+
+因此：
+
+$$
+\boxed{p_W=R_{gimbal2world}(H A^Tp_C+t)}
+$$
+
+也可以从光学相机点直接出发：
+
+$$
+p_W=R_{gimbal2world}(H p_O+t)
+$$
+
+**相机偏移也要随云台旋转。** 只旋转朝向而不旋转手眼平移，会使云台转动时计算出的目标位置漂移。
+
+当前代码没有额外加入云台中心在场地中的平移，因此不是固定原点的完整场地定位。四元数必须对应图像曝光时刻，由上层完成姿态时间匹配，再调用 `set_imu_orientation()`。
+
+##### 4. 从初始位姿提取机构中心、符面偏航和转角
+
+将 PnP 位姿转到世界系：
+
+$$
+c_W=R_{camera2world}\,\texttt{xyz\_in\_camera}+t_{camera2world}
+$$
+
+$$
+R_{rune2world}=R_{camera2world}R_{rune2camera}
+$$
+
+取第一列 $n=R_{rune2world}[:,0]$，即符面 X 轴法线：
+
+$$
+\psi=\operatorname{atan2}(n_y,n_x),\qquad
+\beta=\arcsin(|n_z|)
+$$
+
+$\psi$ 是符面法线在世界水平面内的偏航角；$\beta$ 用于检查符面倾角。跟踪状态只保留 $\psi$，没有继续维护完整三轴符面姿态。
+
+消去偏航后，取种子板绕局部 X 轴的转角：
+
+$$
+M=R_z(-\psi)R_{rune2world},\qquad
+\theta=\operatorname{atan2}(-M_{1,2},M_{2,2})
+$$
+
+矩阵下标从 0 开始。此处不能直接用图像中 R 到靶心的二维夹角代替，因为透视、相机姿态会改变图像角度。
+
+##### 5. 数字例子：核对换轴与手眼顺序
+
+假设光学系点为 $(0.2,-0.1,3)$ m，表示目标在右侧 0.2 m、上方 0.1 m、前方 3 m。
+
+换为相机 FLU：
+
+$$
+p_C=(3,-0.2,0.1)^T
+$$
+
+若理想安装 $H=A$，相机光心在云台系的位置为 $t=(0.1,0,0)^T$，则：
+
+$$
+p_G=(3.1,-0.2,0.1)^T
+$$
+
+云台绕世界 Z 轴转 $90^\circ$ 后：
+
+$$
+p_W=R_z(90^\circ)p_G=(0.2,3.1,0.1)^T
+$$
+
+这些是教学数字，不是本机标定值。反算时应先逆云台旋转，再减手眼平移，最后逆手眼旋转，才能回到最初的光学点。
+
+## 空间模型与 EKF 跟踪
+
+### 状态定义及板心投影
+
+EKF 状态顺序固定为：
+
+$$
+s=(x,y,z,\omega,\theta,\psi)^T
+$$
+
+其中 $(x,y,z)$ 为机构中心，$\omega$ 为角速度，$\theta$ 为连续自转角，$\psi$ 为符面偏航。$\theta$ 不在每帧折回 $[-\pi,\pi]$，便于拟合连续运动。
+
+第 $i$ 块符板，$i=0,1,2,3,4$，对应：
+
+$$
+\alpha_i=\theta+\frac{2\pi i}{5},\qquad
+l_i=\begin{bmatrix}0\\-r\sin\alpha_i\\r\cos\alpha_i\end{bmatrix}
+$$
+
+$$
+p_{W,i}=c_W+R_z(\psi)l_i
+$$
+
+五个板位相差 $72^\circ$。R 标使用 $l_{icon}=(-d,0,0)^T$，不随自转角改变局部位置。
+
+从世界点投影回原图：
+
+$$
+p_C=R_{camera2world}^T(p_W-t_{camera2world}),\qquad
+p_O=A^Tp_C,\qquad
+\hat z=\pi(K,D,p_O)
+$$
+
+$\pi$ 表示带畸变的相机投影，$\hat z$ 是预测像素坐标。光学深度 $Z_O$ 必须大于 0.1 m；对应相机 FLU 中的 $x_C>0.1$ m。
+
+### 预测、关联与校正
+
+**预测：** 相邻帧间隔为 $\Delta t$，当前 EKF 使用恒角速度模型：
+
+$$
+\theta_k^-=\theta_{k-1}+\omega_{k-1}\Delta t
+$$
+
+$$
+F=I,\quad F_{\theta,\omega}=\Delta t,\qquad P^-=FPF^T+Q
+$$
+
+当前实现直接加配置的过程噪声 $Q$，没有额外按 $\Delta t$ 离散化。即使未来预测选择了正弦模型，EKF 自身仍按上式推进。
+
+**关联：** 观测像素 $z_i$ 与特征投影 $h_j(s^-)$ 的平方马氏距离为：
+
+$$
+e_{ij}=z_i-h_j(s^-),\quad
+S_j=H_jP^-H_j^T+R_{obs},\quad
+d_{ij}^2=e_{ij}^TS_j^{-1}e_{ij}
+$$
+
+匈牙利算法按此代价匹配，并通过门限拒绝不合适的候选。R 只能匹配特征 0，符板中心只能匹配板位 1～5；检测数组下标不是固定板位编号。
+
+**校正：** 每个被接受的二维观测依次更新状态：
+
+$$
+K_{gain}=P^-H^T(HP^-H^T+R_{obs})^{-1}
+$$
+
+$$
+s^+=s^-+K_{gain}(z-h(s^-))
+$$
+
+$$
+P^+=(I-K_{gain}H)P^-(I-K_{gain}H)^T+K_{gain}R_{obs}K_{gain}^T
+$$
+
+$K_{gain}$ 是卡尔曼增益，与相机内参 $K$ 不同。$R_{obs}$ 越大，表示越不相信像素观测。
+
+当前均值投影包含畸变，但观测雅可比采用针孔近似：
+
+$$
+J_\pi=\begin{bmatrix}f_x/Z&0&-f_xX/Z^2\\0&f_y/Z&-f_yY/Z^2\end{bmatrix}
+$$
+
+$$
+H\approx J_\pi A^T R_{camera2world}^T\frac{\partial p_W}{\partial s}
+$$
+
+### 哪些观测能参与跟踪
+
+| 观测 | 初始化 PnP | 初始化后校正 | 标记为可击打 |
+|---|---|---|---|
+| R 候选 | 与完整待击板配对 | 校正 R 的投影 | 否 |
+| 完整待击板 | 作为种子板 | 使用靶心像素校正 | 是 |
+| 缺少端点的待击板 | 不能作为首次初始化输入 | 可以使用中心校正 | 是 |
+| 小符激活圆环 | 不能作为种子板 | 可以使用中心校正 | 否 |
+| 大符激活灯臂 | 不能把灯臂四点当成待击板四端点 | 先重建靶心，再使用中心校正 | 否 |
+
+这里描述几何路径，实际观测还必须通过颜色筛选、数值检查和关联门限。四端点主要用于初始位姿和几何检查，正常 EKF 更新主要使用 R 和靶心像素，不是每帧都重新做全部符板 PnP。
+
+当前有两种不同的“丢失”：
+
+- **待击板有效期**：某板位被待击观测校正后，有效期为 100 ms；过期后不再作为当前瞄准候选。
+- **模型丢失**：超过 `lost_timeout_s` 没有待击板校正，或模型发散，清空模型。默认超时为 1.5 s。
+
+仅 R 或激活目标校正可以帮助稳定模型，但不会刷新待击板丢失计时。无检测时仍推进 EKF 和协方差，不把预测点重新作为真实样本送入拟合。
+
+## 大符激活灯臂的几何重建
+
+### 模型与坐标系
+
+深大灯臂的 56 个模型点位于 [szu_light_arm_model.hpp](pose/szu_light_arm_model.hpp)。点表已一次性从原 SZU 坐标转换为符面局部 FLU：
+
+$$
+(x,y,z)_{SZU}\longrightarrow(z,-x,-y)_{FLU}
+$$
+
+运行时不再在 SZU 和 FLU 之间反复转换。`szu_light_arm_model` 的名字说明模型来源，不表示点表仍使用 SZU 坐标。
+
+- 灯臂平面：局部 $x=-0.0111$ m。
+- R 点：局部 $(-d,0,0)$。
+- 零角度靶心：局部 $(0,0,r)$。
+- 自转：绕局部 X 轴，转角正方向与原深大模型一致。
+
+投影任意灯臂模型点：
+
+$$
+p_C=R_{rune2camera}R_x(\theta)p_{model}+c_C
+$$
+
+其中 $c_C$ 是机构中心在相机 FLU 中的位置。点表已经包含灯臂的 11.1 mm 偏移，不再额外叠加。
+
+### 射线求交与转角初值
+
+先用本帧 R 和完整待击板求符面位姿，再将网络给出的灯臂关键点去畸变。光学归一化点 $(u_n,v_n)$ 对应相机 FLU 射线：
+
+$$
+l_C=(1,-u_n,-v_n)^T
+$$
+
+灯臂平面的相机系法线与平面上一点为：
+
+$$
+n_C=R_{rune2camera}(1,0,0)^T,\qquad
+o_C=c_C-0.0111n_C
+$$
+
+射线与平面相交：
+
+$$
+\lambda=\frac{n_C^To_C}{n_C^Tl_C},\qquad
+p_S=R_{rune2camera}^T(\lambda l_C-c_C)
+$$
+
+射线的 X 分量为 1，因此 $\lambda$ 是相机前向深度，单位米，不是沿射线的欧氏距离。
+
+对有效关键点的局部 Y、Z 分量取平均，得到转角初值：
+
+$$
+\theta_0=\operatorname{atan2}(-\bar y,\bar z)
+$$
+
+这是因为绕 X 轴旋转时，零位 $+Z$ 方向变为 $y=-r\sin\theta$、$z=r\cos\theta$。
+
+### 轮廓匹配与输出
+
+关键点仅提供转角初值。代码围绕初值搜索 $\pm30^\circ$，先以 $1^\circ$ 搜索，再用更小步长细化；每次将灯臂模型投影到原图，与实测轮廓的距离图比较。
+
+匹配成功要求包括：模型点支持比例至少 0.8、轮廓距离 RMS 不超过像素门限的 0.75 倍，并通过搜索边界及相邻角度歧义检查。
+
+最终靶心由物理半径恢复：
+
+$$
+p_{C,bullseye}=R_{rune2camera}R_x(\theta)(0,0,r)^T+c_C
+$$
+
+再投影到原图，输出 `Appearance::big_activated` 的中心观测，不伪造四端点。它可参与同一套 EKF 校正，但不会成为待击板。
+
+**这里恢复的是对应符板的靶心，不是机构转动中心。** 缺少同帧 R 或可用完整待击板时，不用历史预测硬补符面。
+
+## 运动拟合与未来状态
+
+### 恒速与正弦模型
+
+拟合输入是实际符板校正后的连续转角和时间。仅 R 校正或纯预测帧不添加样本。
+
+恒速模型：
+
+$$
+\theta(t)\approx C+vt,\qquad
+\theta(t+\tau)=\theta(t)+v\tau
+$$
+
+正弦角速度模型：
+
+$$
+\omega(t)=v+a\sin\phi(t),\qquad
+\phi(t+\tau)=\phi(t)+\Omega\tau
+$$
+
+对角速度积分，得到：
+
+$$
+\theta(t+\tau)=\theta(t)+v\tau+
+\frac{a}{\Omega}\left[\cos\phi(t)-\cos(\phi(t)+\Omega\tau)\right]
+$$
+
+$\Omega$ 是角速度振荡的频率参数，不是机构当前角速度 $\omega$。源码在 $|\Omega|$ 很小时回退恒速积分。
+
+拟合数学实现位于 [rune_energy_fitter.cpp](../../rm_utils/algorithm/rune_energy_fitter.cpp)。当前正弦拟合采用参考深大的可分离 LM–IRLS；窗口为 6 s，最短跨度为 1.5 s。预测器跳过初始化后的首秒，再向拟合器提交样本。
+
+`RunePredictor` 比较恒速与正弦代价；同帧有多个待击板校正时，还有 3 s 的正弦优先窗口。**当前不是单纯根据电控大小符模式强制二选一**。拟合结果用于导出角速度及未来外推，不反写 EKF 六维后验。没有可用拟合时，导出角速度回退到 EKF 估计。
+
+### 瞄准点与时间
+
+`RuneState::get_aimpoints()` 先检查预热：恒速路径 3 s，正弦路径 6 s；再按固定板位顺序选择首个仍有效的待击板。
+
+预测只修改状态副本，不提前推进当前 EKF。未来世界系板心仍使用前面的五板几何公式；`prediction_seconds` 控制跟踪结果中的未来投影时长，不等于实际弹道飞行时间。
+
+跟踪输出的空间点交给 [rune_shooter.cpp](../buff_shoot/rune_shooter.cpp) 处理弹道、处理延迟和飞行时间。不要把简单的几何方位角直接当作完整火控结果。
+
+一帧的图像、检测、姿态和时间必须对应同一次曝光。回放应使用记录或媒体时间；暂停、单步及回放倍速不应改变模型中的物理时间间隔。
+
+## 使用方式与排查
+
+### 对外调用
+
+```cpp
+// 构造时读取跟踪配置，相机 YAML 由 pose 内部加载。
+auto_buff::RmcsTracker tracker(track_config_path, camera_config_path);
+
+// 每帧先更新曝光姿态，再提交对应检测和曝光时间。
+tracker.set_imu_orientation(q_imubody2world);
+auto result = tracker.update(detection, exposure_seconds, image);
+```
+
+| 结果 | 含义 |
+|---|---|
+| `initialized` | 当前存在有效空间模型 |
+| `observed` | 本帧初始化成功，或有观测通过关联和校正 |
+| `ready` | 预热完成，且存在仍有效的待击板 |
+| `state` | 当前导出状态；角速度可能来自拟合 |
+| `ekf` | 原始 EKF 后验及协方差对角项 |
+| `matched` / `predicted` | 本帧接受的像素观测 / 本轮校正前投影 |
+| `future` | 指定预测时长后的五个板位投影 |
+
+`initialized` 不等于允许发射；`ready` 也不能替代 shoot 的有效性判断。
+
+### 常见问题
+
+| 现象 | 优先检查 |
+|---|---|
+| 静止时正常，云台转动时目标漂移 | 曝光姿态是否对应、IMU 换基、手眼平移是否一起旋转 |
+| 左右或上下反了 | 光学系与 FLU 的转换方向、是否重复换轴 |
+| 距离相差约 1000 倍 | 毫米与米混用、模型尺寸单位 |
+| 五点看着正常但 PnP 不稳定 | 端点物理含义、R 突出量、点序、原图内参 |
+| 有检测却不能初始化 | 是否存在完整待击板及 R，待击板是否超过两块，几何检查是否通过 |
+| 圆环能稳定跟踪却不能瞄准 | 激活目标可校正模型，但不是待击目标 |
+| 大符灯臂有四点却没有重建靶心 | 同帧种子板和 R、轮廓提取、灯臂匹配质量 |
+| 短时没检测仍显示投影 | 模型处于预测阶段，投影不代表本帧检测成功 |
+
+在已经按主工程配置好的 Linux 构建目录中，可单独构建和执行相关测试：
+
+```bash
+cmake --build build --target buff_camera_test buff_pose_test buff_track_test buff_predict_test
+ctest --test-dir build -R '^buff_(camera|pose|track|predict)_test$' --output-on-failure
+```
+
+这些测试验证相机换基、PnP、灯臂几何、跟踪与预测的代码行为。合成数据通过不代表实际相机标定、机械尺寸或实机命中率已经验收。
+
+## 附录：模块职责与处理流程
+
+本模块沿用 RMCS 的空间模型和 EKF，接收检测模块提供的 R、符板和灯臂观测，输出当前空间状态及未来符板位置。大符激活灯臂采用深大模型轮廓匹配，但重建出的靶心仍交给同一套 RMCS 跟踪模型。
+
+| 文件 | 作用 |
+|---|---|
+| [track/buff_tracker.cpp](track/buff_tracker.cpp) | 对外入口 `RmcsTracker`，组织观测、初始化、丢失和重建 |
+| [pose/rune_camera.cpp](pose/rune_camera.cpp) | 读取相机标定，将曝光时刻 IMU 姿态组合为相机外参 |
+| [pose/rune_pnp.cpp](pose/rune_pnp.cpp) | 根据 R 整理端点顺序，求初始相机系位姿 |
+| [pose/rune_pose.cpp](pose/rune_pose.cpp) | 遍历 R 与种子板，验证几何并选择初始空间解 |
+| [pose/rune_projection.cpp](pose/rune_projection.cpp) | 将机构中心、转角和符面偏航投影成 R 与五个板心 |
+| [pose/big_activated.cpp](pose/big_activated.cpp) | 用大符激活灯臂轮廓恢复对应靶心的像素位置 |
+| [track/rune_model.cpp](track/rune_model.cpp) | 六维 EKF、观测关联、待击板有效期 |
+| [predict/rune_predictor.cpp](predict/rune_predictor.cpp) | 维护拟合样本，选择恒速或正弦模型，生成未来投影 |
+| [predict/rune_state.cpp](predict/rune_state.cpp) | 状态外推、世界系瞄准点和运动前馈 |
+| [track_types.hpp](track_types.hpp) | 公共状态、拟合参数、几何门限及关联结果 |
+
+```mermaid
+flowchart TD
+    A[同帧图像、检测、时间和 IMU] --> B[更新相机到世界的外参]
+    B --> C{模型是否已初始化}
+    C -->|否| D[R 与完整待击板求初始位姿]
+    C -->|是| E[EKF 预测]
+    E --> F[像素观测关联与校正]
+    F --> G[更新拟合与待击板有效期]
+    G --> I{丢失超时或发散}
+    I -->|否| H[当前状态与未来投影]
+    I -->|是| J[清空模型，等待重新初始化]
+    D -->|几何检查通过| H
+```
+
+大符灯臂的靶心重建发生在观测组织阶段，需要本帧 R 和完整待击板建立符面；不能只靠历史 EKF 位姿恢复灯臂靶心。

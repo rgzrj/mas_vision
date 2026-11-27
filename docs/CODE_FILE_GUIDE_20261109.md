@@ -62,7 +62,7 @@
 
 | 文件 | 所属目标／使用状态 | 实际职责 |
 | --- | --- | --- |
-| [auto_buff/buff_track/buff_state.hpp](../auto_buff/buff_track/buff_state.hpp) | buff_track 公共状态 | 定义 RuneState、初始化位姿、拟合结果、EKF 快照、配置和诊断特征；明确像素/米/弧度与状态顺序。 |
+| [auto_buff/buff_track/track_types.hpp](../auto_buff/buff_track/track_types.hpp) | buff_track 公共状态 | 定义 RuneState、初始化位姿、拟合结果、EKF 快照、配置和诊断特征；明确像素/米/弧度与状态顺序。 |
 | [auto_buff/buff_track/pose/big_activated.cpp](../auto_buff/buff_track/pose/big_activated.cpp) | buff_track | 结合本帧待击板给出的符面位姿、灯臂模板与实测轮廓恢复板心，并验证几何一致性；不是另一个跟踪器。 |
 | [auto_buff/buff_track/pose/big_activated.hpp](../auto_buff/buff_track/pose/big_activated.hpp) | buff_track | 声明大符灯臂到符板中心的几何恢复接口。 |
 | [auto_buff/buff_track/pose/rune_camera.cpp](../auto_buff/buff_track/pose/rune_camera.cpp) | buff_track | 加载标定、核对图像尺寸、应用相机/云台/IMU 坐标关系，为位姿与投影提供同一相机几何。 |
@@ -74,7 +74,7 @@
 | [auto_buff/buff_track/pose/szu_light_arm_model.hpp](../auto_buff/buff_track/pose/szu_light_arm_model.hpp) | buff_track | 保存深大灯臂的 56 个三维模板点，供大符灯臂几何恢复使用；属于模型常量。 |
 | [auto_buff/buff_track/predict/rune_predictor.cpp](../auto_buff/buff_track/predict/rune_predictor.cpp) | buff_track | 维护真实校正样本，比较恒速与正弦拟合并返回预测参数；不独立持有第二套 EKF。 |
 | [auto_buff/buff_track/predict/rune_predictor.hpp](../auto_buff/buff_track/predict/rune_predictor.hpp) | buff_track | 声明转角样本窗口、运动拟合与未来特征预测接口。 |
-| [auto_buff/buff_track/predict/rune_state.cpp](../auto_buff/buff_track/predict/rune_state.cpp) | buff_track | 实现 RuneState 恒速/正弦积分、预热后的待击板瞄准点与方向前馈，以及状态副本的未来像素投影。声明分别在 buff_state.hpp/rune_predictor.hpp。 |
+| [auto_buff/buff_track/predict/rune_state.cpp](../auto_buff/buff_track/predict/rune_state.cpp) | buff_track | 实现 RuneState 恒速/正弦积分、预热后的待击板瞄准点与方向前馈，以及状态副本的未来像素投影。声明分别在 track_types.hpp/rune_predictor.hpp。 |
 | [auto_buff/buff_track/track/buff_tracker.cpp](../auto_buff/buff_track/track/buff_tracker.cpp) | buff_track | 将公共检测转为 RMCS 特征，组织大符几何恢复、初始化、预测/校正、超时/重置及未来投影；消费本帧姿态。 |
 | [auto_buff/buff_track/track/buff_tracker.hpp](../auto_buff/buff_track/track/buff_tracker.hpp) | buff_track | 声明 RmcsTracker 与 TrackResult；管理每帧观测、生命周期和诊断快照。 |
 | [auto_buff/buff_track/track/rune_model.cpp](../auto_buff/buff_track/track/rune_model.cpp) | buff_track | 持有六维状态与协方差，执行预测、投影关联、匈牙利分配、马氏代价和观测校正，维护拟合及发散检查。 |
@@ -151,8 +151,8 @@
 
 | 文件 | 所属目标／使用状态 | 实际职责 |
 | --- | --- | --- |
-| [rm_utils/algorithm/buff/rune_energy_fitter.cpp](../rm_utils/algorithm/buff/rune_energy_fitter.cpp) | rm_utils | 执行真实时间序列的线性和正弦拟合，返回代价和运动参数，不持有上层跟踪生命周期。 |
-| [rm_utils/algorithm/buff/rune_energy_fitter.hpp](../rm_utils/algorithm/buff/rune_energy_fitter.hpp) | rm_utils | 声明打符恒速/正弦转角拟合接口及结果。 |
+| [rm_utils/algorithm/rune_energy_fitter.cpp](../rm_utils/algorithm/rune_energy_fitter.cpp) | rm_utils | 执行真实时间序列的线性和正弦拟合，返回代价和运动参数，不持有上层跟踪生命周期。 |
+| [rm_utils/algorithm/rune_energy_fitter.hpp](../rm_utils/algorithm/rune_energy_fitter.hpp) | rm_utils | 声明打符恒速/正弦转角拟合接口及结果。 |
 | [auto_buff/buff_track/pose/rune_pnp.cpp](../auto_buff/buff_track/pose/rune_pnp.cpp) | auto_buff | 用固定能量机关点位求相对相机位姿，并转换 RMCS 坐标约定。 |
 | [auto_buff/buff_track/pose/rune_pnp.hpp](../auto_buff/buff_track/pose/rune_pnp.hpp) | auto_buff | 声明打符单板几何的 PnP 结果与求解接口。 |
 | [rm_utils/algorithm/conversion.hpp](../rm_utils/algorithm/conversion.hpp) | 头文件公共能力/领域数据 | 头文件提供 OpenCV 右/下/前与 RMCS/ROS 前/左/上位置、旋转的轴变换。 |
@@ -171,7 +171,7 @@
 | [auto_buff/buff_detect/traditional/process.hpp](../auto_buff/buff_detect/traditional/process.hpp) | auto_buff | 声明按 CampColor 提取红/蓝通道的公共图像处理接口。 |
 | [rm_utils/pimpl.hpp](../rm_utils/pimpl.hpp) | 头文件公共能力/领域数据 | 提供 RMCS PImpl 声明宏，供 RuneModel 和 RuneShooter 隐藏实现及禁止复制。 |
 | [auto_buff/buff_types.hpp](../auto_buff/buff_types.hpp) | 打符基础类型 | 颜色枚举、物理尺寸、五点模型、几何观测及带前馈的瞄准点。 |
-| [rm_utils/yolo_timing.hpp](../rm_utils/yolo_timing.hpp) | 头文件公共能力/领域数据 | 定义线程局部 YOLO 分段计时、TimedZone 和 Tracy 生命周期控制；名称所在目录通用，但内容为 YOLO/诊断专用。 |
+| [auto_buff/buff_detect/yolo/timing.hpp](../auto_buff/buff_detect/yolo/timing.hpp) | YOLO 诊断 | 定义线程局部 YOLO 分段计时、TimedZone 和 Tracy 生命周期控制。 |
 
 ## 10 媒体与配对 IO（rm_utils/io）（11 个文件）
 

@@ -1,5 +1,5 @@
 #include "tests/common/detection.hpp"
-#include "rm_utils/yolo_timing.hpp"
+#include "auto_buff/buff_detect/yolo/timing.hpp"
 #include "auto_buff/buff_detect/yolo/yolo.hpp"
 #include "auto_buff/buff_detect/yolo/observation/pose_output.hpp"
 #include "auto_buff/buff_detect/yolo/pixels/pixel_geometry.hpp"
@@ -387,19 +387,19 @@ void check_yolo(bool run_model)
     const auto plain_result = tests::detect(refined, image, 0);
     require(!plain_result.raw_poses.empty(), "Disabled debug discarded the original three-class points");
     require(!plain_result.boards.empty(), "Pixel refinement discarded every SZU reference observation");
-    require(!tracy::IsProfilerStarted() && rm_utils::yolo_timing.yolo_ms == 0 &&
-                rm_utils::yolo_timing.refine_calls == 0,
+    require(!tracy::IsProfilerStarted() && auto_buff::yolo_timing.yolo_ms == 0 &&
+                auto_buff::yolo_timing.refine_calls == 0,
             "Disabled tracy_debug initialized the client or collected timings");
     write_config("color: red\nfeature_points: rmcs_pixels\ntracy_debug: true");
     auto_buff::YoloDetector traced(YAML::LoadFile(config_path.string()), config_path.parent_path());
     const auto unstarted_result = tests::detect(traced, image, 0);
-    require(!tracy::IsProfilerStarted() && rm_utils::yolo_timing.yolo_ms == 0 &&
-                rm_utils::yolo_timing.refine_calls == 0 && unstarted_result.boards.size() == plain_result.boards.size(),
+    require(!tracy::IsProfilerStarted() && auto_buff::yolo_timing.yolo_ms == 0 &&
+                auto_buff::yolo_timing.refine_calls == 0 && unstarted_result.boards.size() == plain_result.boards.size(),
             "Detector started Tracy or measured before the test initialized the client");
-    rm_utils::start_tracy();
+    auto_buff::start_tracy();
     const auto traced_result = tests::detect(traced, image, 0);
-    require(tracy::IsProfilerStarted() && rm_utils::yolo_timing.yolo_ms > 0 && rm_utils::yolo_timing.refine_ms > 0 &&
-                rm_utils::yolo_timing.refine_calls > 0,
+    require(tracy::IsProfilerStarted() && auto_buff::yolo_timing.yolo_ms > 0 && auto_buff::yolo_timing.refine_ms > 0 &&
+                auto_buff::yolo_timing.refine_calls > 0,
             "Enabled tracy_debug did not collect both YOLO and refinement");
     require(plain_result.boards.size() == traced_result.boards.size() &&
                 plain_result.markers.size() == traced_result.markers.size(),
@@ -409,7 +409,7 @@ void check_yolo(bool run_model)
                     plain_result.boards[i].corners == traced_result.boards[i].corners,
                 "tracy_debug changed the refined geometry");
     tests::detect(refined, image, 0);
-    require(tracy::IsProfilerStarted() && rm_utils::yolo_timing.yolo_ms == 0 && rm_utils::yolo_timing.refine_calls == 0,
+    require(tracy::IsProfilerStarted() && auto_buff::yolo_timing.yolo_ms == 0 && auto_buff::yolo_timing.refine_calls == 0,
             "Started Tracy ignored the detector's disabled collection flag");
     write_config("color: red\nfeature_points: rmcs_pixels\ndebug: true");
     auto_buff::YoloDetector diagnostic(YAML::LoadFile(config_path.string()), config_path.parent_path());

@@ -1,6 +1,6 @@
 #pragma once
 #include "auto_buff/buff_detect/buff_detector.hpp"
-#include "auto_buff/buff_track/buff_state.hpp"
+#include "auto_buff/buff_track/track_types.hpp"
 #include "auto_buff/debug/visualize/track_debug.hpp"
 #include "../pose/rune_camera.hpp"
 
@@ -33,9 +33,9 @@ struct TrackResult
     RuneState state{};
     RuneEkfSnapshot ekf;                                  // 当前后验；initialized=false 时不可作为有效状态使用。
     std::optional<Eigen::Quaterniond> gimbal_orientation; // 本帧输入的云台到世界姿态，仅供显示。
-    std::vector<RuneAddition::Tracked> predicted;         // 本轮校正前的特征投影。
-    std::vector<RuneAddition::Tracked> matched;           // 本帧通过关联的实际像素观测。
-    std::vector<RuneAddition::Tracked> future;            // 指定预测时长后的五个符板中心。
+    std::vector<RuneAssociation::Tracked> predicted;      // 本轮校正前的特征投影。
+    std::vector<RuneAssociation::Tracked> matched;        // 本帧通过关联的实际像素观测。
+    std::vector<RuneAssociation::Tracked> future;         // 指定预测时长后的五个符板中心。
 };
 
 // 跟踪子系统的应用入口：组织观测和生命周期，内部复用 RMCS pose / EKF /
@@ -45,7 +45,7 @@ class RmcsTracker
 public:
     /**
      * @brief 创建位姿相机并读取 RMCS 跟踪参数；相机 YAML 由 pose 内部加载。
-     * @param camera_config 支持平铺或 calibration 节点的相机 YAML。
+     * @param camera_config 包含 calibration 和完整 handeye_calibration 的相机 YAML。
      * @param track_config track 配置节点，含丢失时长、预测时长及原版模型门限。
      */
     RmcsTracker(const std::filesystem::path &camera_config, const YAML::Node &track_config);
@@ -58,10 +58,10 @@ public:
      * @brief 转换公共观测并执行初始化，或 predict → correct → 丢失检查。
      * @param detection 本帧全部候选；初始位姿需要 R 和完整待击板的真实端点。
      * @param media_seconds 曝光/媒体时间，单位秒；倒退或长间隔会重新初始化。
-     * @param image 同帧原图；使用 image.size() 核对标定尺寸，开启 debug 时同时用于绘制。
+     * @param image 同帧原图，开启 debug 时用于绘制。
      * @return 当前状态、关联观测和未来投影；初始化失败时 initialized=false。
      */
-    // 完成计算后用同帧原图绘制，图像尺寸直接用于标定一致性检查。
+    // 完成计算后用同帧原图绘制。
     TrackResult update(const BuffDetector::Detection &detection, double media_seconds, const cv::Mat &image);
 
     void disable_debug() noexcept
@@ -83,10 +83,9 @@ private:
      * @brief 更新模型状态
      * @param detection 本帧检测结果
      * @param media_seconds 媒体时间
-     * @param image_size 图像尺寸
      * @return 跟踪结果
      */
-    TrackResult update_model(const BuffDetector::Detection &detection, double media_seconds, cv::Size image_size);
+    TrackResult update_model(const BuffDetector::Detection &detection, double media_seconds);
 
     TrackDebug track_debug_;
     RuneCamera camera_; // 位姿模块内部读取并持有相机标定，跟踪不再解析相机 YAML。

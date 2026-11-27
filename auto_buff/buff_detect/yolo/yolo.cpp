@@ -2,7 +2,7 @@
 
 #include "inference/inference.hpp"
 #include "observation/pose_output.hpp"
-#include "rm_utils/yolo_timing.hpp"
+#include "timing.hpp"
 
 #include <yaml-cpp/yaml.h>
 #include <cmath>
@@ -42,22 +42,22 @@ std::optional<BuffDetector::Detection> YoloDetector::collect_impl()
     if (!frame)
         return std::nullopt;
 
-    auto &timing         = rm_utils::yolo_timing;
+    auto &timing         = yolo_timing;
     timing               = {};
     timing.enabled       = frame->profiling;
     timing.preprocess_ms = frame->prepare_ms;
     // GPU 计时包含排队和等待收取，不代表纯设备执行耗时。
     if (timing.enabled)
-        timing.infer_ms =
+        timing.request_ms =
             std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - frame->submitted).count();
 
     TracyCZoneN(zone, "YOLO decode", frame->profiling);
-    rm_utils::TimedZone timer(timing.decode_ms, zone, frame->profiling);
+    TimedZone timer(timing.decode_ms, zone, frame->profiling);
     auto objects = decode_pose_output(frame->output, frame->output.size() / kPoseChannels, frame->image.size(),
                                       frame->scale, frame->pad, confidence_, point_confidence_, nms_distance_);
 
     timer.finish();
-    timing.yolo_ms = timing.preprocess_ms + timing.infer_ms + timing.decode_ms;
+    timing.yolo_ms = timing.preprocess_ms + timing.request_ms + timing.decode_ms;
 
     // 使用提交时的原图和颜色完成观测转换与精修。
     auto result      = make_pose_detection(objects, frame->image, frame->color, refine_, frame->profiling);
